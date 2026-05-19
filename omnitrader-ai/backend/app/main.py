@@ -42,6 +42,7 @@ from app.api import briefing as briefing_router
 from app.api import insiders as insiders_router
 from app.api import analysts as analysts_router
 from app.api import economic_calendar as economic_calendar_router
+from app.api import analytics as analytics_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -84,6 +85,14 @@ async def run_intraday_us():
     logger.info("[Scheduler] Intraday US 15m refresh...")
     from app.flows.intraday_flow import intraday_us_flow
     await intraday_us_flow()
+
+
+# ── US options chain (daily after close) ──────────────────────────────────────
+
+async def run_us_options_daily():
+    logger.info("[Scheduler] US options chain snapshot...")
+    from app.flows.us_options_flow import us_options_daily_flow
+    await us_options_daily_flow()
 
 
 # ── NSE F&O option chain snapshots ────────────────────────────────────────────
@@ -208,6 +217,7 @@ async def lifespan(app: FastAPI):
             ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
             InsiderTransaction, AnalystRating, StockTechnicals, ShortInterest, Dividend,
             IntradayPrice, FoChainSnapshot, CorporateAction, MutualFundNav, MutualFundHolding,
+            SecFiling, UsOptionsSnapshot, RbiAnnouncement, GoogleTrendsData,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -261,6 +271,10 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
+    # ── US options chain: daily after US close (21:30 UTC) ────────────────────
+    scheduler.add_job(run_us_options_daily, CronTrigger(hour=21, minute=30, day_of_week="mon-fri"),
+                      id="us_options_daily", replace_existing=True)
+
     # ── Daily ingestion pipeline ───────────────────────────────────────────────
     scheduler.add_job(run_daily, CronTrigger(hour=22, minute=0, day_of_week="mon-fri"),
                       id="daily_ingest", replace_existing=True)
@@ -299,6 +313,7 @@ async def lifespan(app: FastAPI):
         "  Intraday 15m IN:  04:00, 06:00, 08:00, 10:15 UTC (weekdays)\n"
         "  Intraday 15m US:  14:45, 17:00, 19:00, 21:15 UTC (weekdays)\n"
         "  F&O OI chain:     every 15 min, 04:00-10:00 UTC (weekdays)\n"
+        "  US options chain: 21:30 UTC weekdays\n"
         "  Daily ingest:     22:00 UTC weekdays\n"
         "  Agent scoring:    23:00 UTC weekdays\n"
         "  Swing screener:   00:30 UTC weekdays\n"
@@ -342,6 +357,7 @@ app.include_router(briefing_router.router,         prefix="/api/v1/briefing",   
 app.include_router(insiders_router.router,         prefix="/api/v1/insiders",           tags=["insiders"])
 app.include_router(analysts_router.router,         prefix="/api/v1/analysts",           tags=["analysts"])
 app.include_router(economic_calendar_router.router, prefix="/api/v1/economic-calendar", tags=["economic-calendar"])
+app.include_router(analytics_router.router)  # prefix already set in router (/api/analytics)
 
 import os
 from fastapi.staticfiles import StaticFiles

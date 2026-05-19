@@ -59,6 +59,18 @@ _MIGRATIONS = [
     # Mutual fund holdings
     "CREATE TABLE IF NOT EXISTS mutual_fund_holdings (id SERIAL PRIMARY KEY, scheme_code VARCHAR NOT NULL, disclosure_date DATE NOT NULL, ticker VARCHAR, company_name VARCHAR, isin VARCHAR, market_value FLOAT, pct_net_assets FLOAT, shares_held BIGINT, CONSTRAINT uq_mf_holding UNIQUE (scheme_code, disclosure_date, ticker))",
     "CREATE INDEX IF NOT EXISTS ix_mf_holding_ticker ON mutual_fund_holdings (ticker)",
+    # SEC EDGAR filings
+    "CREATE TABLE IF NOT EXISTS sec_filings (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, cik VARCHAR NOT NULL, filing_type VARCHAR NOT NULL, filed_date DATE NOT NULL, period_end DATE NOT NULL, accession_no VARCHAR, filing_url VARCHAR, xbrl_metrics JSONB, risk_factors TEXT, CONSTRAINT uq_sec_filing UNIQUE (ticker, filing_type, period_end))",
+    "CREATE INDEX IF NOT EXISTS ix_sec_filing_ticker_date ON sec_filings (ticker, filed_date)",
+    # US equity options chain snapshots
+    "CREATE TABLE IF NOT EXISTS us_options_snapshots (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, snapshot_date DATE NOT NULL, expiry DATE NOT NULL, strike FLOAT NOT NULL, option_type VARCHAR NOT NULL, bid FLOAT, ask FLOAT, last_price FLOAT, volume FLOAT, open_interest FLOAT, implied_vol FLOAT, delta FLOAT, gamma FLOAT, theta FLOAT, vega FLOAT, in_the_money BOOLEAN, CONSTRAINT uq_us_options UNIQUE (ticker, snapshot_date, expiry, strike, option_type))",
+    "CREATE INDEX IF NOT EXISTS ix_us_options_ticker_date ON us_options_snapshots (ticker, snapshot_date)",
+    # RBI press releases
+    "CREATE TABLE IF NOT EXISTS rbi_announcements (id SERIAL PRIMARY KEY, published_date TIMESTAMPTZ NOT NULL, title VARCHAR NOT NULL, category VARCHAR, url VARCHAR NOT NULL, summary TEXT, sentiment_score FLOAT, is_policy_rate BOOLEAN DEFAULT FALSE, CONSTRAINT uq_rbi_url UNIQUE (url))",
+    "CREATE INDEX IF NOT EXISTS ix_rbi_pub_date ON rbi_announcements (published_date)",
+    # Google Trends interest scores
+    "CREATE TABLE IF NOT EXISTS google_trends (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, interest_score INTEGER, keyword VARCHAR, geo VARCHAR, trend_7d_avg FLOAT, CONSTRAINT uq_gtrends_ticker_date UNIQUE (ticker, date))",
+    "CREATE INDEX IF NOT EXISTS ix_gtrends_ticker_date ON google_trends (ticker, date)",
 ]
 
 

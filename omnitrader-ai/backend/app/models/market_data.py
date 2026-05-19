@@ -518,3 +518,86 @@ class MutualFundHolding(Base):
     market_value    = Column(Float)                         # in crores INR
     pct_net_assets  = Column(Float)                         # % of scheme AUM
     shares_held     = Column(BigInteger, nullable=True)
+
+
+class SecFiling(Base):
+    """SEC EDGAR 10-K and 10-Q filings with XBRL-extracted key metrics."""
+    __tablename__ = "sec_filings"
+    __table_args__ = (
+        UniqueConstraint("ticker", "filing_type", "period_end", name="uq_sec_filing"),
+        Index("ix_sec_filing_ticker_date", "ticker", "filed_date"),
+    )
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    ticker       = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    cik          = Column(String, nullable=False)               # SEC CIK number (zero-padded 10 digits)
+    filing_type  = Column(String, nullable=False)               # "10-K" or "10-Q"
+    filed_date   = Column(Date, nullable=False, index=True)
+    period_end   = Column(Date, nullable=False)                 # fiscal period end date
+    accession_no = Column(String)                               # SEC accession number
+    filing_url   = Column(String)                               # EDGAR filing index URL
+    xbrl_metrics = Column(JSONB)                                # key XBRL extracted numbers
+    risk_factors = Column(Text, nullable=True)                  # extracted Risk Factors text (truncated)
+
+
+class UsOptionsSnapshot(Base):
+    """US equity options chain snapshot — per strike, per expiry."""
+    __tablename__ = "us_options_snapshots"
+    __table_args__ = (
+        UniqueConstraint("ticker", "snapshot_date", "expiry", "strike", "option_type",
+                         name="uq_us_options"),
+        Index("ix_us_options_ticker_date", "ticker", "snapshot_date"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    ticker        = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    expiry        = Column(Date, nullable=False)
+    strike        = Column(Float, nullable=False)
+    option_type   = Column(String, nullable=False)              # "call" or "put"
+    bid           = Column(Float)
+    ask           = Column(Float)
+    last_price    = Column(Float)
+    volume        = Column(Float)
+    open_interest = Column(Float)
+    implied_vol   = Column(Float)                               # as decimal (0.25 = 25%)
+    delta         = Column(Float, nullable=True)
+    gamma         = Column(Float, nullable=True)
+    theta         = Column(Float, nullable=True)
+    vega          = Column(Float, nullable=True)
+    in_the_money  = Column(Boolean, nullable=True)
+
+
+class RbiAnnouncement(Base):
+    """RBI press releases and monetary policy announcements."""
+    __tablename__ = "rbi_announcements"
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_rbi_url"),
+        Index("ix_rbi_pub_date", "published_date"),
+    )
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    published_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    title          = Column(String, nullable=False)
+    category       = Column(String)                             # "Monetary Policy", "Regulation", "Data Release"
+    url            = Column(String, nullable=False)
+    summary        = Column(Text, nullable=True)                # first ~500 chars of body
+    sentiment_score = Column(Float, nullable=True)              # −1.0 to +1.0 (hawkish/dovish)
+    is_policy_rate  = Column(Boolean, default=False)            # True if repo rate changed
+
+
+class GoogleTrendsData(Base):
+    """Google Trends search interest score for ticker names."""
+    __tablename__ = "google_trends"
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_gtrends_ticker_date"),
+        Index("ix_gtrends_ticker_date", "ticker", "date"),
+    )
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    ticker         = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    date           = Column(Date, nullable=False, index=True)
+    interest_score = Column(Integer)                            # 0–100 Google Trends scale
+    keyword        = Column(String)                             # search term used
+    geo            = Column(String)                             # "US", "IN", ""
+    trend_7d_avg   = Column(Float, nullable=True)               # rolling 7-day avg for smoothing

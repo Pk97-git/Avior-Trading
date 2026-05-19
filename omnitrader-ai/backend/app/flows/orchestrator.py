@@ -94,6 +94,11 @@ from app.flows.insiders_flow import insiders_initial_flow, insiders_daily_flow
 from app.flows.intraday_flow import intraday_initial_flow
 from app.flows.corporate_actions_flow import corporate_actions_initial_flow, corporate_actions_weekly_flow
 from app.flows.mutual_funds_flow import mutual_funds_initial_flow, mutual_funds_daily_flow
+from app.flows.sec_filings_flow import sec_filings_initial_flow, sec_filings_weekly_flow, sec_filings_monthly_flow
+from app.flows.us_options_flow import us_options_initial_flow, us_options_daily_flow
+from app.flows.alternative_data_flow import (
+    alternative_data_initial_flow, alternative_data_daily_flow, alternative_data_weekly_flow
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,11 +162,23 @@ async def full_initial_load_flow():
     except Exception as e:
         logger.error("[Initial] Corporate actions failed: %s", e)
 
-    logger.info("\n[11/11] ── MUTUAL FUND NAV ──────────────────────────────")
+    logger.info("\n[11/13] ── MUTUAL FUND NAV ──────────────────────────────")
     try:
         await mutual_funds_initial_flow()
     except Exception as e:
         logger.error("[Initial] Mutual fund NAV failed: %s", e)
+
+    logger.info("\n[12/13] ── SEC FILINGS (10-K/10-Q) ──────────────────────")
+    try:
+        await sec_filings_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] SEC filings failed: %s", e)
+
+    logger.info("\n[13/13] ── ALTERNATIVE DATA (RBI + TRENDS) ───────────────")
+    try:
+        await alternative_data_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Alternative data failed: %s", e)
 
     logger.info("\n" + "=" * 60)
     logger.info("  FULL INITIAL LOAD COMPLETE")
@@ -206,6 +223,13 @@ async def daily_ingest_flow():
     except Exception as e:
         logger.error("[Daily] Mutual fund NAV failed: %s", e)
 
+    # RBI announcements + US options chain (daily)
+    try:
+        await alternative_data_daily_flow()
+        await us_options_daily_flow()
+    except Exception as e:
+        logger.error("[Daily] Alternative data / US options failed: %s", e)
+
     logger.info("=== DAILY INGEST COMPLETE ===")
 
 
@@ -246,6 +270,20 @@ async def weekly_ingest_flow():
     except Exception as e:
         logger.error("[Weekly] Corporate actions failed: %s", e)
 
+    # SEC 10-K/10-Q filings weekly check
+    try:
+        await sec_filings_weekly_flow()
+        logger.info("[Weekly] SEC filings refreshed.")
+    except Exception as e:
+        logger.error("[Weekly] SEC filings failed: %s", e)
+
+    # Google Trends (rate-limited — weekly cadence)
+    try:
+        await alternative_data_weekly_flow()
+        logger.info("[Weekly] Google Trends refreshed.")
+    except Exception as e:
+        logger.error("[Weekly] Google Trends failed: %s", e)
+
     logger.info("=== WEEKLY INGEST COMPLETE ===")
 
 
@@ -268,4 +306,12 @@ async def monthly_ingest_flow():
     """
     logger.info("=== MONTHLY INGEST — QUARTERLY FILINGS ===")
     await institutional_monthly_flow()
+
+    # SEC filings monthly broad sweep (all US equities)
+    try:
+        await sec_filings_monthly_flow()
+        logger.info("[Monthly] SEC filings broad sweep complete.")
+    except Exception as e:
+        logger.error("[Monthly] SEC filings broad sweep failed: %s", e)
+
     logger.info("=== MONTHLY INGEST COMPLETE ===")
