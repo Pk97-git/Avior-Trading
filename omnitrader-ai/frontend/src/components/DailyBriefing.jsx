@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Newspaper, RefreshCw, TrendingUp, TrendingDown, AlertTriangle,
     ShieldAlert, ChevronDown, ChevronUp, Target, StopCircle,
-    DollarSign, Activity, Zap, BarChart2, Calendar, Layers,
+    DollarSign, Activity, Zap, BarChart2, Calendar, Layers, Users,
     CheckCircle, XCircle, MinusCircle, ArrowRight, Clock,
 } from 'lucide-react';
 import { briefingApi } from '../api';
@@ -174,6 +174,28 @@ function StockCard({ stock, onDeepDive }) {
                             </span>
                             {stock.country && (
                                 <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{stock.country}</span>
+                            )}
+                            {/* Insider signal badge */}
+                            {stock.insider_signal === 'CLUSTER_BUY' && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30 font-semibold animate-pulse">
+                                    🔥 Cluster Buy
+                                </span>
+                            )}
+                            {stock.insider_signal === 'INSIDER_BUY' && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 font-medium">
+                                    👤 Insider Buy
+                                </span>
+                            )}
+                            {/* Analyst signal badge */}
+                            {stock.analyst_signal?.signal === 'BULLISH' && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 font-medium">
+                                    ↑ {stock.analyst_signal.upgrades} Upgrade{stock.analyst_signal.upgrades > 1 ? 's' : ''}
+                                </span>
+                            )}
+                            {stock.analyst_signal?.signal === 'BEARISH' && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px]">
+                                    ↓ Downgraded
+                                </span>
                             )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">{stock.name} · {stock.sector}</p>
@@ -459,6 +481,18 @@ export default function DailyBriefing({ onNavigate }) {
                 </button>
             </div>
 
+            {/* ── Blackout warning ── */}
+            {data.is_blackout && data.next_event && (
+                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 flex items-center gap-3">
+                    <AlertTriangle size={16} className="text-red-400 shrink-0" />
+                    <div>
+                        <span className="text-sm font-semibold text-red-400">High-Impact Event in next 24h: </span>
+                        <span className="text-sm text-red-300">{data.next_event.event}</span>
+                        <span className="text-xs text-red-400/70 ml-2">— consider reducing new positions</span>
+                    </div>
+                </div>
+            )}
+
             {/* ── Macro + CB Banner ── */}
             <MacroBanner macro={data.macro_context} cb={data.circuit_breaker} />
 
@@ -467,6 +501,25 @@ export default function DailyBriefing({ onNavigate }) {
 
             {/* ── Sector Positioning ── */}
             <SectorChips sectors={data.sector_advice} />
+
+            {/* ── Upcoming Events Strip ── */}
+            {data.upcoming_events?.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="text-muted-foreground font-medium flex items-center gap-1">
+                        <Calendar size={12} />
+                        Events:
+                    </span>
+                    {data.upcoming_events.slice(0, 4).map((evt, i) => (
+                        <span key={i} className={`px-2 py-0.5 rounded border font-medium ${
+                            evt.days_until <= 3
+                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                : 'bg-muted text-muted-foreground border-border'
+                        }`}>
+                            {evt.days_until === 0 ? 'Today' : evt.days_until === 1 ? 'Tomorrow' : `${evt.days_until}d`} · {evt.event}
+                        </span>
+                    ))}
+                </div>
+            )}
 
             {/* ── BUY + SELL columns ── */}
             <div className="grid md:grid-cols-2 gap-6">

@@ -39,6 +39,9 @@ from app.api import risk as risk_router
 from app.api import earnings as earnings_router
 from app.api import options as options_router
 from app.api import briefing as briefing_router
+from app.api import insiders as insiders_router
+from app.api import analysts as analysts_router
+from app.api import economic_calendar as economic_calendar_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -284,6 +287,9 @@ app.include_router(risk_router.router,             prefix="/api/v1/risk",       
 app.include_router(earnings_router.router,         prefix="/api/v1/earnings",          tags=["earnings"])
 app.include_router(options_router.router,          prefix="/api/v1/options",           tags=["options"])
 app.include_router(briefing_router.router,         prefix="/api/v1/briefing",          tags=["briefing"])
+app.include_router(insiders_router.router,         prefix="/api/v1/insiders",           tags=["insiders"])
+app.include_router(analysts_router.router,         prefix="/api/v1/analysts",           tags=["analysts"])
+app.include_router(economic_calendar_router.router, prefix="/api/v1/economic-calendar", tags=["economic-calendar"])
 
 import os
 from fastapi.staticfiles import StaticFiles

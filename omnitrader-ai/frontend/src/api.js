@@ -108,6 +108,23 @@ export const briefingApi = {
     refresh:   () => api.post('/briefing/refresh'),
 };
 
+export const insidersApi = {
+    getRecent:    (params = {}) => api.get('/insiders/recent', { params }),
+    getTicker:    (ticker) => api.get(`/insiders/${ticker.toUpperCase()}`),
+    getUniverse:  () => api.get('/insiders/stats/universe'),
+};
+
+export const analystsApi = {
+    getRecent:    (params = {}) => api.get('/analysts/recent', { params }),
+    getTicker:    (ticker) => api.get(`/analysts/${ticker.toUpperCase()}`),
+    getConsensus: (ticker) => api.get(`/analysts/consensus/${ticker.toUpperCase()}`),
+};
+
+export const economicCalendarApi = {
+    getEvents:   (days = 30) => api.get('/economic-calendar/events', { params: { days_ahead: days } }),
+    getBlackout: () => api.get('/economic-calendar/events/blackout'),
+};
+
 export const trailingStopsApi = {
     run:         () => api.post('/trailing-stops/run'),
     runSingle:   (positionId) => api.post(`/trailing-stops/${positionId}`),

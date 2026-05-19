@@ -163,6 +163,25 @@ async def daily_ingest_flow():
     await institutional_daily_flow()
     await sentiment_daily_flow()
     await computed_daily_flow()
+
+    # Insider transactions + analyst ratings (daily refresh)
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.ingestion.insider.form4 import SecForm4Service
+        from app.ingestion.core.analyst_ratings import AnalystRatingService
+        from app.ingestion.infra.universe import UniverseManager
+        async with AsyncSessionLocal() as db:
+            universe = UniverseManager()
+            high_tickers = [t for t in universe.get_tickers("HIGH")
+                            if not t.startswith("^") and "-USD" not in t][:50]
+            insider_svc  = SecForm4Service(db)
+            analyst_svc  = AnalystRatingService(db)
+            r1 = await insider_svc.run_batch(high_tickers)
+            r2 = await analyst_svc.run_batch(high_tickers)
+            logger.info("[Daily] Insiders: %s | Analysts: %s", r1, r2)
+    except Exception as e:
+        logger.error("[Daily] Insider/Analyst ingestion failed: %s", e)
+
     logger.info("=== DAILY INGEST COMPLETE ===")
 
 

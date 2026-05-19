@@ -309,3 +309,48 @@ class Order(Base):
     __table_args__ = (
         Index("ix_orders_ticker_status", "ticker", "status"),
     )
+
+
+class InsiderTransaction(Base):
+    """SEC Form 4 insider buy/sell transactions."""
+    __tablename__ = "insider_transactions"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    ticker          = Column(String, ForeignKey("stocks.ticker"), nullable=False, index=True)
+    filed_date      = Column(DateTime(timezone=True), index=True)
+    transaction_date = Column(DateTime(timezone=True))
+    insider_name    = Column(String)
+    insider_role    = Column(String)   # "CEO", "CFO", "Director", "10% Owner", etc.
+    transaction_type = Column(String)  # "P" = Purchase, "S" = Sale, "A" = Award
+    shares          = Column(Float)
+    price_per_share = Column(Float)
+    total_value     = Column(Float)    # shares * price
+    shares_owned_after = Column(Float)
+    form_type       = Column(String, default="4")  # "4" or "4/A"
+    sec_url         = Column(String)
+
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        Index("ix_insider_ticker_date", "ticker", "filed_date"),
+    )
+
+
+class AnalystRating(Base):
+    """Analyst upgrade/downgrade/initiation events."""
+    __tablename__ = "analyst_ratings"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    ticker       = Column(String, ForeignKey("stocks.ticker"), nullable=False, index=True)
+    date         = Column(DateTime(timezone=True), index=True)
+    firm         = Column(String)
+    action       = Column(String)   # "upgrade", "downgrade", "init", "reiterate"
+    from_grade   = Column(String)   # "Hold", "Neutral", "Sell"
+    to_grade     = Column(String)   # "Buy", "Strong Buy", "Overweight"
+    price_target = Column(Float)    # New price target if given
+
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        Index("ix_analyst_ticker_date", "ticker", "date"),
+    )
