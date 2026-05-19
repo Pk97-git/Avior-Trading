@@ -215,9 +215,90 @@ class TechnicalAgent:
                     score += 3
                     thesis.append("Price at lower Bollinger Band — potential mean-reversion opportunity.")
 
+        # ── 7. Mean Reversion Signals (new columns) ───────────────────────────
+        # Get extended columns if available
+        tech_ext = await self.db.execute(text("""
+            SELECT vwap, bb_bandwidth, bb_squeeze, price_zscore_20d,
+                   fib_high_50d, fib_low_50d, fib_382, fib_618, fib_pct_pos
+            FROM stock_technicals
+            WHERE ticker = :ticker
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        ext = tech_ext.fetchone()
+
+        if ext:
+            # VWAP
+            if ext.vwap and price:
+                if price > ext.vwap * 1.02:
+                    score += 4
+                    thesis.append(f"Price above VWAP (${ext.vwap:.2f}) — institutional demand zone confirmed.")
+                elif price < ext.vwap * 0.98:
+                    score -= 4
+                    thesis.append(f"Price below VWAP (${ext.vwap:.2f}) — selling pressure dominant.")
+
+            # Bollinger Squeeze — coiled spring, imminent breakout
+            if ext.bb_squeeze:
+                thesis.append("Bollinger Squeeze active — volatility compression signals imminent breakout.")
+
+            # Price z-score — mean reversion
+            if ext.price_zscore_20d is not None:
+                z = ext.price_zscore_20d
+                if z > 2.0:
+                    score -= 6
+                    thesis.append(f"Price z-score +{z:.1f}σ — extended above 20-day mean. Reversion risk.")
+                elif z < -2.0:
+                    score += 6
+                    thesis.append(f"Price z-score {z:.1f}σ — deeply below mean. Mean-reversion opportunity.")
+                elif z < -1.0:
+                    score += 3
+                    thesis.append(f"Price z-score {z:.1f}σ — below mean. Mild mean-reversion setup.")
+
+            # Fibonacci position
+            if ext.fib_pct_pos is not None and ext.fib_382 is not None and ext.fib_618 is not None:
+                fp = ext.fib_pct_pos
+                if 0.36 <= fp <= 0.40:
+                    score += 5
+                    thesis.append(f"Price at 38.2% Fibonacci support (${ext.fib_382:.2f}) — key retracement level.")
+                elif 0.60 <= fp <= 0.64:
+                    score += 7
+                    thesis.append(f"Price at 61.8% Fibonacci support (golden ratio ${ext.fib_618:.2f}) — high-probability bounce zone.")
+                elif fp > 0.92:
+                    score += 4
+                    thesis.append(f"Price near 52-week Fibonacci high — strong breakout momentum.")
+                elif fp < 0.15:
+                    score -= 5
+                    thesis.append(f"Price near Fibonacci low ({fp*100:.0f}% of range) — deep correction.")
+
+        # ── 8. Candlestick Pattern ────────────────────────────────────────────
+        candle_result = await self.db.execute(text("""
+            SELECT dominant, signal, pattern_count
+            FROM candlestick_patterns
+            WHERE ticker = :ticker
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        candle = candle_result.fetchone()
+
+        if candle and candle.dominant:
+            if candle.signal == "REVERSAL_UP":
+                score += 10
+                thesis.append(f"Candlestick: {candle.dominant} — bullish reversal pattern detected.")
+            elif candle.signal == "BULLISH":
+                score += 5
+                thesis.append(f"Candlestick: {candle.dominant} — bullish continuation signal.")
+            elif candle.signal == "REVERSAL_DOWN":
+                score -= 10
+                thesis.append(f"Candlestick: {candle.dominant} — bearish reversal pattern detected.")
+            elif candle.signal == "BEARISH":
+                score -= 5
+                thesis.append(f"Candlestick: {candle.dominant} — bearish continuation signal.")
+
         score = max(0, min(100, score))
         logger.info("TechnicalAgent %s: score=%d price=%.2f RSI=%s",
                     self.ticker, score, price,
                     f"{rsi:.1f}" if rsi is not None else "n/a")
 
-        return {"score": score, "thesis": thesis, "atr_14": latest.atr_14}
+        return {"score": score, "thesis": thesis, "atr_14": latest.atr_14,
+                "bb_squeeze": bool(ext.bb_squeeze) if ext and ext.bb_squeeze else False,
+                "price_zscore": float(ext.price_zscore_20d) if ext and ext.price_zscore_20d else None,
+                "fib_pct_pos": float(ext.fib_pct_pos) if ext and ext.fib_pct_pos else None,
+                "candlestick_signal": candle.signal if candle else None}

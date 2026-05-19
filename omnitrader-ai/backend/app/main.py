@@ -43,6 +43,7 @@ from app.api import insiders as insiders_router
 from app.api import analysts as analysts_router
 from app.api import economic_calendar as economic_calendar_router
 from app.api import analytics as analytics_router
+from app.api import research as research_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -218,6 +219,7 @@ async def lifespan(app: FastAPI):
             InsiderTransaction, AnalystRating, StockTechnicals, ShortInterest, Dividend,
             IntradayPrice, FoChainSnapshot, CorporateAction, MutualFundNav, MutualFundHolding,
             SecFiling, UsOptionsSnapshot, RbiAnnouncement, GoogleTrendsData,
+            ValuationMetrics, CandlestickPattern, EarningsTranscript, PairTrade,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -358,6 +360,7 @@ app.include_router(insiders_router.router,         prefix="/api/v1/insiders",   
 app.include_router(analysts_router.router,         prefix="/api/v1/analysts",           tags=["analysts"])
 app.include_router(economic_calendar_router.router, prefix="/api/v1/economic-calendar", tags=["economic-calendar"])
 app.include_router(analytics_router.router)  # prefix already set in router (/api/analytics)
+app.include_router(research_router.router)   # prefix already set in router (/api/v1/research)
 
 import os
 from fastapi.staticfiles import StaticFiles

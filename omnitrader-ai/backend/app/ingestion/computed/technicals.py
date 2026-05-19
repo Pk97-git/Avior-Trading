@@ -95,6 +95,29 @@ def _compute_technicals(df: pd.DataFrame) -> pd.DataFrame:
     df["week_52_high"] = c.rolling(252).max()
     df["week_52_low"]  = c.rolling(252).min()
 
+    # ── Mean Reversion Signals ──────────────────────────────────────────────
+    # Price z-score vs 20-day mean
+    rolling_std_20 = c.rolling(20).std()
+    df["price_zscore_20d"] = (c - df["sma_20"]) / rolling_std_20.replace(0, float("nan"))
+
+    # Bollinger Bandwidth (volatility measure, percent)
+    df["bb_bandwidth"] = ((df["bb_upper"] - df["bb_lower"]) / df["bb_mid"].replace(0, float("nan"))) * 100
+
+    # Bollinger Squeeze: bandwidth < 10th percentile of trailing 126 days
+    bw_10th = df["bb_bandwidth"].rolling(126).quantile(0.10)
+    df["bb_squeeze"] = df["bb_bandwidth"] < bw_10th
+
+    # ── Fibonacci Levels (50-day swing high/low) ──────────────────────────
+    df["fib_high_50d"] = c.rolling(50).max()
+    df["fib_low_50d"]  = c.rolling(50).min()
+    fib_range = df["fib_high_50d"] - df["fib_low_50d"]
+    fib_range_safe = fib_range.replace(0, float("nan"))
+    df["fib_236"] = df["fib_low_50d"] + 0.236 * fib_range
+    df["fib_382"] = df["fib_low_50d"] + 0.382 * fib_range
+    df["fib_500"] = df["fib_low_50d"] + 0.500 * fib_range
+    df["fib_618"] = df["fib_low_50d"] + 0.618 * fib_range
+    df["fib_pct_pos"] = (c - df["fib_low_50d"]) / fib_range_safe  # 0=at low, 1=at high
+
     return df
 
 
@@ -133,6 +156,27 @@ class TechnicalIndicatorService:
             return pd.Series(dtype=float)
         df = pd.DataFrame(rows, columns=["date", "close"])
         return df.set_index("date")["close"]
+
+    async def _load_intraday_vwap(self, ticker: str, start_date: date = None) -> pd.Series:
+        """Compute daily VWAP for ticker from intraday_prices. Returns Series indexed by date."""
+        query = """
+            SELECT time::date AS dt,
+                   SUM(close * COALESCE(volume, 0)) / NULLIF(SUM(COALESCE(volume, 0)), 0) AS vwap
+            FROM intraday_prices
+            WHERE ticker = :ticker AND close IS NOT NULL
+        """
+        params = {"ticker": ticker}
+        if start_date:
+            lookback = start_date - timedelta(days=10)
+            query += " AND time >= :lb"
+            params["lb"] = lookback
+        query += " GROUP BY dt ORDER BY dt ASC"
+        result = await self.db.execute(text(query), params)
+        rows = result.fetchall()
+        if not rows:
+            return pd.Series(dtype=float)
+        df = pd.DataFrame(rows, columns=["dt", "vwap"])
+        return df.set_index("dt")["vwap"]
 
     async def compute_and_store(
         self,
@@ -247,8 +291,19 @@ class TechnicalIndicatorService:
                 "vol_ratio":    _f(row.get("vol_ratio")),
                 "week_52_high": _f(row.get("week_52_high")),
                 "week_52_low":  _f(row.get("week_52_low")),
-                "rs_vs_spx":    rs_val if not is_india else None,
-                "rs_vs_nsei":   rs_val if is_india else None,
+                "rs_vs_spx":         rs_val if not is_india else None,
+                "rs_vs_nsei":        rs_val if is_india else None,
+                "vwap":              None,  # populated separately via _load_intraday_vwap
+                "bb_bandwidth":      _f(row.get("bb_bandwidth")),
+                "bb_squeeze":        bool(row.get("bb_squeeze")) if row.get("bb_squeeze") is not None and not (isinstance(row.get("bb_squeeze"), float) and math.isnan(row.get("bb_squeeze"))) else None,
+                "price_zscore_20d":  _f(row.get("price_zscore_20d")),
+                "fib_high_50d":      _f(row.get("fib_high_50d")),
+                "fib_low_50d":       _f(row.get("fib_low_50d")),
+                "fib_236":           _f(row.get("fib_236")),
+                "fib_382":           _f(row.get("fib_382")),
+                "fib_500":           _f(row.get("fib_500")),
+                "fib_618":           _f(row.get("fib_618")),
+                "fib_pct_pos":       _f(row.get("fib_pct_pos")),
             }
             records.append(rec)
 
@@ -263,6 +318,28 @@ class TechnicalIndicatorService:
         )
         await self.db.execute(stmt)
         await self.db.commit()
+
+        # Populate VWAP from intraday data (separate pass — data may not exist yet)
+        try:
+            vwap_series = await self._load_intraday_vwap(ticker, start_date)
+            if not vwap_series.empty:
+                for rec in records:
+                    d = rec["date"]
+                    if d in vwap_series.index:
+                        rec["vwap"] = float(vwap_series[d])
+                # Re-upsert only rows that got VWAP data
+                vwap_records = [r for r in records if r.get("vwap") is not None]
+                if vwap_records:
+                    stmt2 = pg_insert(StockTechnicals).values(vwap_records)
+                    stmt2 = stmt2.on_conflict_do_update(
+                        constraint="uq_stock_technicals_ticker_date",
+                        set_={"vwap": stmt2.excluded.vwap},
+                    )
+                    await self.db.execute(stmt2)
+                    await self.db.commit()
+        except Exception as e:
+            logger.debug("[Technicals] VWAP update for %s: %s", ticker, e)
+
         return len(records)
 
     async def run_batch(

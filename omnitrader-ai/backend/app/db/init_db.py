@@ -8,6 +8,7 @@ from app.models.market_data import (
     NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
     ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
     InsiderTransaction, AnalystRating, StockTechnicals,
+    ValuationMetrics, CandlestickPattern, EarningsTranscript, PairTrade,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations
@@ -71,6 +72,32 @@ _MIGRATIONS = [
     # Google Trends interest scores
     "CREATE TABLE IF NOT EXISTS google_trends (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, interest_score INTEGER, keyword VARCHAR, geo VARCHAR, trend_7d_avg FLOAT, CONSTRAINT uq_gtrends_ticker_date UNIQUE (ticker, date))",
     "CREATE INDEX IF NOT EXISTS ix_gtrends_ticker_date ON google_trends (ticker, date)",
+    # StockTechnicals new columns (mean reversion + fibonacci)
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS vwap FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS bb_bandwidth FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS bb_squeeze BOOLEAN",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS price_zscore_20d FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_high_50d FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_low_50d FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_236 FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_382 FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_500 FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_618 FLOAT",
+    "ALTER TABLE stock_technicals ADD COLUMN IF NOT EXISTS fib_pct_pos FLOAT",
+    # NewsSentiment event type
+    "ALTER TABLE news_sentiment ADD COLUMN IF NOT EXISTS event_type VARCHAR",
+    # Valuation metrics
+    "CREATE TABLE IF NOT EXISTS valuation_metrics (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, computed_date DATE NOT NULL, current_price FLOAT, pe_ratio FLOAT, pb_ratio FLOAT, ps_ratio FLOAT, peg_ratio FLOAT, ev_ebitda FLOAT, ev FLOAT, dcf_value FLOAT, wacc FLOAT, terminal_growth FLOAT, margin_of_safety FLOAT, valuation_label VARCHAR, composite_score FLOAT, CONSTRAINT uq_valuation_ticker_date UNIQUE (ticker, computed_date))",
+    "CREATE INDEX IF NOT EXISTS ix_valuation_ticker_date ON valuation_metrics (ticker, computed_date)",
+    # Candlestick patterns
+    "CREATE TABLE IF NOT EXISTS candlestick_patterns (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, patterns JSONB, dominant VARCHAR, signal VARCHAR, pattern_count INTEGER DEFAULT 0, CONSTRAINT uq_candle_ticker_date UNIQUE (ticker, date))",
+    "CREATE INDEX IF NOT EXISTS ix_candle_ticker_date ON candlestick_patterns (ticker, date)",
+    # Earnings transcripts
+    "CREATE TABLE IF NOT EXISTS earnings_transcripts (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, earnings_date DATE NOT NULL, fiscal_period VARCHAR, source_url VARCHAR, raw_text TEXT, ai_summary TEXT, management_tone VARCHAR, key_topics JSONB, sentiment_score FLOAT, guidance_change VARCHAR, CONSTRAINT uq_transcript_ticker_date UNIQUE (ticker, earnings_date))",
+    "CREATE INDEX IF NOT EXISTS ix_transcript_ticker_date ON earnings_transcripts (ticker, earnings_date)",
+    # Pair trades
+    "CREATE TABLE IF NOT EXISTS pair_trades (id SERIAL PRIMARY KEY, symbol_a VARCHAR NOT NULL, symbol_b VARCHAR NOT NULL, sector VARCHAR, cointegration_pvalue FLOAT, correlation_90d FLOAT, spread_mean FLOAT, spread_std FLOAT, spread_zscore FLOAT, hedge_ratio FLOAT, signal VARCHAR, signal_strength VARCHAR, last_updated TIMESTAMPTZ, CONSTRAINT uq_pair_trade UNIQUE (symbol_a, symbol_b))",
+    "CREATE INDEX IF NOT EXISTS ix_pair_trade_signal ON pair_trades (signal)",
 ]
 
 

@@ -48,6 +48,8 @@ from app.ingestion.infra.universe import UniverseManager
 from app.ingestion.computed.charts import ChartGenerationService
 from app.ingestion.computed.features import MarketSnapshotService
 from app.ingestion.computed.technicals import TechnicalIndicatorService
+from app.ingestion.computed.candlesticks import CandlestickPatternService
+from app.ingestion.computed.valuations import ValuationService
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,10 @@ async def computed_initial_flow():
     logger.info("Snapshots: %s", r2)
     r3 = await task_technicals(start_date=None)
     logger.info("Technicals (full backfill): %s", r3)
+    r4 = await task_candlesticks()
+    logger.info("Candlestick patterns: %s", r4)
+    r5 = await task_valuations()
+    logger.info("Valuation models: %s", r5)
     logger.info("=== [Computed] Initial Load Complete ===")
 
 
@@ -164,9 +170,49 @@ async def computed_daily_flow():
     result = await task_snapshots()
     logger.info("Snapshots: %s", result)
     from datetime import date as _date
-    result2 = await task_technicals(start_date=_date.today())
+    today = _date.today()
+    result2 = await task_technicals(start_date=today)
     logger.info("Technicals (today): %s", result2)
+    result3 = await task_candlesticks(start_date=today)
+    logger.info("Candlesticks (today): %s", result3)
     logger.info("=== [Computed] Daily Snapshots Complete ===")
+
+
+@task(name="Computed — Candlestick Patterns", retries=1)
+async def task_candlesticks(start_date=None) -> dict:
+    """
+    Detects 15 candlestick patterns (Doji, Hammer, Engulfing, etc.) for all
+    HIGH+MEDIUM equity tickers. Upserts results into candlestick_patterns table.
+    """
+    from app.ingestion.infra.universe import UniverseManager
+    mgr = UniverseManager(use_cache=True, cache_ttl_hours=24)
+    _NON_EQUITY = ("-USD", "=F", ".NYB")
+    tickers = [
+        t for t in mgr.get_all_tickers("MEDIUM")
+        if not any(t.endswith(x) for x in _NON_EQUITY) and "^" not in t
+    ]
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = CandlestickPatternService(session)
+        result = await svc.run_batch(tickers, start_date=start_date)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
+@task(name="Computed — Valuation Models", retries=1)
+async def task_valuations() -> dict:
+    """
+    Computes DCF intrinsic value, EV/EBITDA, P/B, P/S, PEG, margin of safety,
+    and composite valuation score for all HIGH-tier equities. Upserts to
+    valuation_metrics table.
+    """
+    from app.ingestion.infra.universe import UniverseManager
+    mgr = UniverseManager(use_cache=True, cache_ttl_hours=24)
+    tickers = mgr.get_all_tickers("HIGH")
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = ValuationService(session)
+        result = await svc.run_batch(tickers)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
 
 
 @flow(name="Computed — Weekly Charts", log_prints=True)
@@ -180,4 +226,8 @@ async def computed_weekly_flow():
     logger.info("=== [Computed] Weekly Chart Regeneration ===")
     result = await task_charts()
     logger.info("Charts: %s", result)
+    r2 = await task_candlesticks()
+    logger.info("Candlesticks: %s", r2)
+    r3 = await task_valuations()
+    logger.info("Valuations: %s", r3)
     logger.info("=== [Computed] Weekly Chart Regeneration Complete ===")

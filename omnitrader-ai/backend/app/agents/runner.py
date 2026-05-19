@@ -40,6 +40,11 @@ from app.agents.calibration import CalibrationEngine
 from app.agents.sizing import SizingEngine
 from app.agents.execution import ExecutionModel
 from app.agents.executive import ExecutiveTrader
+try:
+    from app.agents.transcript import TranscriptAgent
+    _TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    _TRANSCRIPT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +227,13 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     except Exception as e:
         vision_result = e
 
+    transcript_result = {"score": 50, "thesis": [], "summary": None}
+    if _TRANSCRIPT_AVAILABLE:
+        try:
+            transcript_result = await TranscriptAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("TranscriptAgent failed for %s: %s", ticker, e)
+
     def _safe(result, default_score=50, name=""):
         if isinstance(result, Exception):
             logger.error("Agent %s failed for %s: %s", name, ticker, result)
@@ -235,6 +247,12 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     sent_result   = _safe(sent_result,   name="Sentiment")
     mem_result    = _safe(mem_result,    name="Memory")
     vision_result = _safe(vision_result, name="Vision")
+
+    # Blend transcript guidance/tone into fundamental score (minor adjustment)
+    if transcript_result.get("thesis"):
+        t_delta = transcript_result["score"] - 50  # -50 to +50
+        fund_result["score"] = max(0, min(100, fund_result["score"] + round(t_delta * 0.15)))
+        fund_result.setdefault("thesis", []).extend(transcript_result["thesis"])
 
     regime = macro_result.get("regime", "Unknown")
 
@@ -352,6 +370,8 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "stop_loss":               sizing_result.get("stop_loss"),
         "take_profit":             sizing_result.get("take_profit"),
         "atr_14":                  sizing_result.get("atr_14"),
+        # Transcript intelligence
+        "earnings_summary":        transcript_result.get("summary"),
     }
 
     # ── Persist ──────────────────────────────────────────────────────────────

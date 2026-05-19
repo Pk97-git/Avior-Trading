@@ -118,6 +118,7 @@ class NewsSentiment(Base):
     url = Column(String)
     sentiment_score = Column(Float)    # −1.0 to +1.0
     confidence = Column(Float)
+    event_type = Column(String, nullable=True)   # EARNINGS_BEAT, EARNINGS_MISS, GUIDANCE_RAISE, GUIDANCE_CUT, INSIDER_BUY, M&A_TARGET, CEO_CHANGE, BUYBACK, FDA_APPROVAL, MACRO_SHOCK, NONE
 
 
 class PromoterHolding(Base):
@@ -400,6 +401,21 @@ class StockTechnicals(Base):
     rs_vs_spx  = Column(Float)   # 3-month % return / SPX 3-month % return
     rs_vs_nsei = Column(Float)   # 3-month % return / Nifty 3-month % return (India stocks only)
 
+    # Mean reversion / volatility signals
+    vwap             = Column(Float, nullable=True)   # daily VWAP from intraday 15m bars
+    bb_bandwidth     = Column(Float, nullable=True)   # (bb_upper-bb_lower)/bb_mid*100
+    bb_squeeze       = Column(Boolean, nullable=True) # True if bandwidth < 10th percentile trailing 126d
+    price_zscore_20d = Column(Float, nullable=True)   # (close - sma_20) / 20d rolling std
+
+    # Fibonacci levels (50-day swing)
+    fib_high_50d = Column(Float, nullable=True)   # 50-day swing high
+    fib_low_50d  = Column(Float, nullable=True)   # 50-day swing low
+    fib_236      = Column(Float, nullable=True)   # 23.6% retracement from low
+    fib_382      = Column(Float, nullable=True)   # 38.2% retracement
+    fib_500      = Column(Float, nullable=True)   # 50.0% retracement
+    fib_618      = Column(Float, nullable=True)   # 61.8% golden ratio retracement
+    fib_pct_pos  = Column(Float, nullable=True)   # price position in fib range (0=low, 1=high)
+
 
 class ShortInterest(Base):
     __tablename__ = "short_interest"
@@ -601,3 +617,92 @@ class GoogleTrendsData(Base):
     keyword        = Column(String)                             # search term used
     geo            = Column(String)                             # "US", "IN", ""
     trend_7d_avg   = Column(Float, nullable=True)               # rolling 7-day avg for smoothing
+
+
+class ValuationMetrics(Base):
+    """Computed valuation metrics: DCF, EV/EBITDA, P/B, P/S, PEG."""
+    __tablename__ = "valuation_metrics"
+    __table_args__ = (
+        UniqueConstraint("ticker", "computed_date", name="uq_valuation_ticker_date"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    ticker        = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    computed_date = Column(Date, nullable=False, index=True)
+    current_price = Column(Float)
+
+    # Relative valuation
+    pe_ratio      = Column(Float, nullable=True)   # P/E (from company_financials)
+    pb_ratio      = Column(Float, nullable=True)   # Price / Book Value per share
+    ps_ratio      = Column(Float, nullable=True)   # Price / Sales per share
+    peg_ratio     = Column(Float, nullable=True)   # PE / EPS growth rate
+    ev_ebitda     = Column(Float, nullable=True)   # Enterprise Value / EBITDA
+    ev            = Column(Float, nullable=True)   # Enterprise Value (market cap + debt - cash)
+
+    # Intrinsic / DCF
+    dcf_value         = Column(Float, nullable=True)   # DCF intrinsic value per share
+    wacc              = Column(Float, nullable=True)   # WACC used for DCF (%)
+    terminal_growth   = Column(Float, nullable=True)   # terminal growth rate used (%)
+    margin_of_safety  = Column(Float, nullable=True)   # (dcf_value - price) / dcf_value * 100
+
+    # Summary
+    valuation_label   = Column(String, nullable=True)  # "DEEP_VALUE", "FAIR", "OVERVALUED", "EXPENSIVE"
+    composite_score   = Column(Float, nullable=True)   # 0-100 valuation attractiveness (100=cheapest)
+
+
+class CandlestickPattern(Base):
+    """Detected candlestick patterns per ticker per date."""
+    __tablename__ = "candlestick_patterns"
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_candle_ticker_date"),
+    )
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    ticker         = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    date           = Column(Date, nullable=False, index=True)
+    patterns       = Column(JSONB)       # list of {name, direction, strength} dicts
+    dominant       = Column(String, nullable=True)  # strongest detected pattern name
+    signal         = Column(String, nullable=True)  # "BULLISH", "BEARISH", "NEUTRAL", "REVERSAL_UP", "REVERSAL_DOWN"
+    pattern_count  = Column(Integer, default=0)
+
+
+class EarningsTranscript(Base):
+    """Earnings call transcript summary (from SEC 8-K or external source)."""
+    __tablename__ = "earnings_transcripts"
+    __table_args__ = (
+        UniqueConstraint("ticker", "earnings_date", name="uq_transcript_ticker_date"),
+    )
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    ticker          = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    earnings_date   = Column(Date, nullable=False, index=True)
+    fiscal_period   = Column(String, nullable=True)   # "Q1 2025", "FY 2024"
+    source_url      = Column(String, nullable=True)
+    raw_text        = Column(Text, nullable=True)     # truncated to ~3000 chars for context
+    ai_summary      = Column(Text, nullable=True)     # Claude 3-5 sentence summary
+    management_tone = Column(String, nullable=True)   # "BULLISH", "CAUTIOUS", "BEARISH"
+    key_topics      = Column(JSONB, nullable=True)    # list of key topics/themes mentioned
+    sentiment_score = Column(Float, nullable=True)    # -1.0 to +1.0
+    guidance_change = Column(String, nullable=True)   # "RAISED", "LOWERED", "MAINTAINED", "NONE"
+
+
+class PairTrade(Base):
+    """Statistical arbitrage pair — cointegrated stock pairs with spread tracking."""
+    __tablename__ = "pair_trades"
+    __table_args__ = (
+        UniqueConstraint("symbol_a", "symbol_b", name="uq_pair_trade"),
+    )
+
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    symbol_a             = Column(String, nullable=False, index=True)
+    symbol_b             = Column(String, nullable=False, index=True)
+    sector               = Column(String, nullable=True)
+    cointegration_pvalue = Column(Float, nullable=True)   # Engle-Granger p-value (<0.05 = cointegrated)
+    correlation_90d      = Column(Float, nullable=True)   # 90-day Pearson correlation
+    spread_mean          = Column(Float, nullable=True)   # historical spread mean
+    spread_std           = Column(Float, nullable=True)   # historical spread std dev
+    spread_zscore        = Column(Float, nullable=True)   # current spread z-score
+    hedge_ratio          = Column(Float, nullable=True)   # OLS beta (shares of B per 1 share of A)
+    signal               = Column(String, nullable=True)  # "LONG_A_SHORT_B", "LONG_B_SHORT_A", "NEUTRAL"
+    signal_strength      = Column(String, nullable=True)  # "STRONG", "MODERATE", "WEAK"
+    last_updated         = Column(DateTime(timezone=True), nullable=True, index=True)

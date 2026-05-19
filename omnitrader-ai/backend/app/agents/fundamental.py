@@ -250,6 +250,68 @@ class FundamentalAgent:
         except Exception:
             pass
 
+        # ── Valuation Models (DCF / EV/EBITDA / P/B / PEG) ───────────────────
+        try:
+            val_res = await self.db.execute(text("""
+                SELECT pe_ratio, pb_ratio, ps_ratio, peg_ratio, ev_ebitda,
+                       dcf_value, margin_of_safety, valuation_label, composite_score,
+                       current_price
+                FROM valuation_metrics
+                WHERE ticker = :t
+                ORDER BY computed_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            val = val_res.fetchone()
+            if val:
+                # DCF Margin of Safety
+                if val.margin_of_safety is not None:
+                    mos = val.margin_of_safety
+                    if mos > 30:
+                        score += 12
+                        thesis.append(f"DCF margin of safety +{mos:.0f}% — significantly undervalued vs intrinsic value.")
+                    elif mos > 10:
+                        score += 6
+                        thesis.append(f"DCF margin of safety +{mos:.0f}% — modest undervaluation.")
+                    elif mos < -30:
+                        score -= 12
+                        thesis.append(f"DCF margin of safety {mos:.0f}% — price far exceeds intrinsic value.")
+                    elif mos < -10:
+                        score -= 5
+                        thesis.append(f"Slight DCF overvaluation (margin of safety {mos:.0f}%).")
+
+                # PEG ratio (growth-adjusted PE)
+                if val.peg_ratio is not None:
+                    peg = val.peg_ratio
+                    if peg < 0.8:
+                        score += 8
+                        thesis.append(f"PEG ratio {peg:.2f} — growth at a discount (PEG < 1 = undervalued growth).")
+                    elif peg < 1.2:
+                        score += 4
+                        thesis.append(f"PEG ratio {peg:.2f} — reasonably priced for growth.")
+                    elif peg > 2.5:
+                        score -= 6
+                        thesis.append(f"PEG ratio {peg:.2f} — paying high premium for growth.")
+
+                # EV/EBITDA
+                if val.ev_ebitda is not None:
+                    ev_eb = val.ev_ebitda
+                    if ev_eb < 8:
+                        score += 6
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — cheap on enterprise value basis.")
+                    elif ev_eb < 15:
+                        score += 2
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — fair valuation.")
+                    elif ev_eb > 30:
+                        score -= 6
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — premium multiple; requires strong growth.")
+
+                # Valuation label summary
+                if val.valuation_label == "DEEP_VALUE":
+                    thesis.append("Valuation: DEEP VALUE — multiple metrics indicate significant undervaluation.")
+                elif val.valuation_label == "EXPENSIVE":
+                    thesis.append(f"Valuation: EXPENSIVE — trading at premium across multiple metrics.")
+        except Exception as e:
+            logger.debug("Valuation metrics fetch for %s: %s", self.ticker, e)
+
         score = max(0, min(100, score))
         logger.info("FundamentalAgent %s: score=%d", self.ticker, score)
 

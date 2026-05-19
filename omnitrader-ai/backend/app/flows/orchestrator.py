@@ -99,6 +99,8 @@ from app.flows.us_options_flow import us_options_initial_flow, us_options_daily_
 from app.flows.alternative_data_flow import (
     alternative_data_initial_flow, alternative_data_daily_flow, alternative_data_weekly_flow
 )
+from app.flows.pair_trading_flow import pair_trading_initial_flow, pair_trading_weekly_flow
+from app.flows.transcripts_flow import transcripts_initial_flow, transcripts_daily_flow
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +182,18 @@ async def full_initial_load_flow():
     except Exception as e:
         logger.error("[Initial] Alternative data failed: %s", e)
 
+    logger.info("\n[14/15] ── PAIR TRADING (COINTEGRATION SCAN) ─────────────")
+    try:
+        await pair_trading_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Pair trading scan failed: %s", e)
+
+    logger.info("\n[15/15] ── EARNINGS TRANSCRIPTS + EVENT EXTRACTION ────────")
+    try:
+        await transcripts_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Transcripts/event extraction failed: %s", e)
+
     logger.info("\n" + "=" * 60)
     logger.info("  FULL INITIAL LOAD COMPLETE")
     logger.info("=" * 60)
@@ -229,6 +243,12 @@ async def daily_ingest_flow():
         await us_options_daily_flow()
     except Exception as e:
         logger.error("[Daily] Alternative data / US options failed: %s", e)
+
+    # Earnings transcripts + event type classification (daily — catch new 8-K filings)
+    try:
+        await transcripts_daily_flow()
+    except Exception as e:
+        logger.error("[Daily] Transcripts/event extraction failed: %s", e)
 
     logger.info("=== DAILY INGEST COMPLETE ===")
 
@@ -283,6 +303,13 @@ async def weekly_ingest_flow():
         logger.info("[Weekly] Google Trends refreshed.")
     except Exception as e:
         logger.error("[Weekly] Google Trends failed: %s", e)
+
+    # Pair trading cointegration scan (weekly — re-evaluate all sector pairs)
+    try:
+        await pair_trading_weekly_flow()
+        logger.info("[Weekly] Pair trading signals refreshed.")
+    except Exception as e:
+        logger.error("[Weekly] Pair trading scan failed: %s", e)
 
     logger.info("=== WEEKLY INGEST COMPLETE ===")
 
