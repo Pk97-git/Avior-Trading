@@ -269,9 +269,15 @@ async def get_system_status(db: AsyncSession = Depends(get_db)):
     except Exception:
         universe_breakdown = {}
 
+    notification_channels = {
+        "slack": bool(os.getenv("SLACK_WEBHOOK_URL")),
+        "email": bool(os.getenv("ALERT_EMAIL_TO") and os.getenv("SMTP_USER")),
+    }
+
     return {
-        "api_keys":          api_keys,
-        "table_counts":      table_counts,
-        "last_runs":         last_runs,
-        "universe_breakdown": universe_breakdown,
+        "api_keys":             api_keys,
+        "table_counts":         table_counts,
+        "last_runs":            last_runs,
+        "universe_breakdown":   universe_breakdown,
+        "notification_channels": notification_channels,
     }

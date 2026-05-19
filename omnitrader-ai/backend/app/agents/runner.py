@@ -166,6 +166,26 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
 
     analysis_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # ── Circuit breaker gate — skip analysis if market conditions say HALT ──
+    from app.engines.circuit_breaker import CircuitBreakerEngine
+    cb = CircuitBreakerEngine(db)
+    cb_state = await cb.check()
+    if not cb_state["trading_allowed"]:
+        logger.warning("[CircuitBreaker] HALT for %s — reasons: %s", ticker, cb_state["reasons"])
+        # Still return a minimal result so callers don't crash
+        return {
+            "ticker": ticker,
+            "analysis_date": analysis_date.isoformat(),
+            "signal": "AVOID",
+            "final_score": 30,
+            "regime": "Unknown",
+            "circuit_breaker": cb_state,
+            "signal_thesis": cb_state["reasons"],
+        }
+    elif cb_state["caution"]:
+        logger.info("[CircuitBreaker] CAUTION for %s — %s", ticker, cb_state["reasons"])
+        # Continue analysis but flag it in the result
+
     # ── Phase 1: Core agents (run sequentially to avoid asyncpg session conflicts) ──
     try:
         fund_result = await FundamentalAgent(db, ticker).analyze()
@@ -284,7 +304,11 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     calibrated_prob = calibrator.predict(exec_result["final_score"])
 
     sizing = SizingEngine(db, ticker)
-    sizing_result = await sizing.compute(calibrated_prob, exec_result["final_score"])
+    sizing_result = await sizing.compute(
+        calibrated_prob,
+        exec_result["final_score"],
+        caution_mode=cb_state.get("caution", False),
+    )
 
     execution = ExecutionModel(db, ticker)
     exec_cost_result = await execution.adjust(sizing_result["kelly_fraction"])
@@ -361,4 +385,5 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "correlated_peer": portfolio_result.get("correlated_peer"),
         "execution_note": exec_cost_result.get("execution_note"),
         "volatility_note": sizing_result.get("volatility_note"),
+        "circuit_breaker": cb_state,
     }

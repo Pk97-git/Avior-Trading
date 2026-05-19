@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { watchlistApi } from '../api';
 import { Loader2, RefreshCw, Plus, Trash2, Star, ChevronUp, ChevronDown } from 'lucide-react';
 import { SignalBadge } from './shared/SignalCard';
+import { useLivePrices } from '../hooks/useLivePrices';
 
 const PRIORITY_CONFIG = {
     HIGH:   { label: 'High',   cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
@@ -144,6 +145,9 @@ export default function Watchlist({ onNavigate }) {
         return sortDir === 'asc' ? cmp : -cmp;
     });
 
+    const liveTickers = items.map(i => i.ticker);
+    const { prices: livePrices } = useLivePrices(liveTickers);
+
     const SortIcon = ({ field }) => {
         if (sortBy !== field) return null;
         return sortDir === 'asc'
@@ -265,10 +269,22 @@ export default function Watchlist({ onNavigate }) {
                                             ) : <span className="text-muted-foreground/50 text-xs">—</span>}
                                         </td>
                                         <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
-                                            {item.current_price != null
-                                                ? `$${item.current_price.toLocaleString()}`
-                                                : <span className="text-muted-foreground/50">—</span>
-                                            }
+                                            {(() => {
+                                                const live = livePrices[item.ticker];
+                                                const displayPrice = live?.price ?? item.current_price;
+                                                const changeColor = live?.change_pct > 0 ? 'text-emerald-400' : live?.change_pct < 0 ? 'text-red-400' : '';
+                                                if (displayPrice == null) return <span className="text-muted-foreground/50">—</span>;
+                                                return (
+                                                    <span>
+                                                        ${displayPrice.toLocaleString()}
+                                                        {live?.change_pct != null && (
+                                                            <span className={`ml-1 ${changeColor}`}>
+                                                                ({live.change_pct >= 0 ? '+' : ''}{live.change_pct.toFixed(2)}%)
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                         <td className="px-4 py-3 text-xs text-muted-foreground hidden md:table-cell max-w-[200px] truncate">
                                             {item.notes || '—'}

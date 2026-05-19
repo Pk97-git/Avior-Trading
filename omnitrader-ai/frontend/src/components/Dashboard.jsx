@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { agentsApi } from '../api';
-import { TrendingUp, Zap, Globe2, Bell, RefreshCw, Loader2, ChevronRight } from 'lucide-react';
+import { agentsApi, circuitBreakerApi } from '../api';
+import { TrendingUp, Zap, Globe2, Bell, RefreshCw, Loader2, ChevronRight, AlertTriangle, ShieldAlert } from 'lucide-react';
 import SignalCard, { SignalBadge } from './shared/SignalCard';
 
 const REGIME_COLORS = {
@@ -76,6 +76,24 @@ export default function Dashboard({ onNavigate }) {
     const [error, setError] = useState(null);
     const [markingRead, setMarkingRead] = useState(false);
 
+    // ── Circuit Breaker status ──────────────────────────────────────────────────
+    const [cbStatus, setCbStatus] = useState(null); // { status, reasons }
+
+    useEffect(() => {
+        let cancelled = false;
+        const fetchCB = async () => {
+            try {
+                const res = await circuitBreakerApi.getStatus();
+                if (!cancelled) setCbStatus(res.data);
+            } catch {
+                // silently ignore — don't block dashboard on CB failure
+            }
+        };
+        fetchCB();
+        const interval = setInterval(fetchCB, 5 * 60 * 1000); // every 5 min
+        return () => { cancelled = true; clearInterval(interval); };
+    }, []);
+
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -137,6 +155,28 @@ export default function Dashboard({ onNavigate }) {
                     <RefreshCw className="h-4 w-4" /> Refresh
                 </button>
             </div>
+
+            {/* ── Circuit Breaker Banner ── */}
+            {cbStatus && cbStatus.status !== 'CLEAR' && (
+                <div className={`w-full rounded-xl px-5 py-4 flex flex-col gap-2 border ${
+                    cbStatus.status === 'HALT'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                        : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
+                }`}>
+                    <div className="flex items-center gap-2 font-semibold text-sm">
+                        {cbStatus.status === 'HALT'
+                            ? <ShieldAlert className="h-4 w-4 shrink-0" />
+                            : <AlertTriangle className="h-4 w-4 shrink-0" />
+                        }
+                        Circuit Breaker: {cbStatus.status}
+                    </div>
+                    {Array.isArray(cbStatus.reasons) && cbStatus.reasons.length > 0 && (
+                        <ul className="list-disc list-inside text-xs space-y-0.5 opacity-90">
+                            {cbStatus.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                        </ul>
+                    )}
+                </div>
+            )}
 
             {/* ── Stats ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

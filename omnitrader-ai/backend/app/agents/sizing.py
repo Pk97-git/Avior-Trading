@@ -59,6 +59,7 @@ class SizingEngine:
         calibrated_prob: float,
         final_score: int,
         upside_downside_ratio: float = 1.5,  # default if no technical targets
+        caution_mode: bool = False,           # circuit breaker caution → halve kelly
     ) -> dict:
         try:
             atr = await self._compute_atr_from_db()
@@ -87,6 +88,12 @@ class SizingEngine:
             # Score-based sanity gate: don't size at all if score < 55
             if final_score < 55:
                 final_fraction = 0.0
+
+            # Circuit breaker caution: halve position size to reduce risk exposure
+            if caution_mode and final_fraction > 0.0:
+                final_fraction *= 0.5
+                logger.info("SizingEngine [%s]: caution_mode active — kelly halved to %.4f",
+                            self.ticker, final_fraction)
 
             volatility_note = (
                 f"14d ATR = {atr:.2f} ({atr_ratio*100:.1f}% of price). "

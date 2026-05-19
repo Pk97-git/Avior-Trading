@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { portfolioApi } from '../api';
 import { SignalBadge } from './shared/SignalCard';
+import { useLivePrices } from '../hooks/useLivePrices';
 import {
     Loader2, RefreshCw, Plus, ChevronDown, ChevronUp,
     TrendingUp, TrendingDown, DollarSign, Briefcase,
@@ -424,7 +425,7 @@ function CloseDialog({ position, onClose, onCancel }) {
 
 // ─── Open Positions Table ──────────────────────────────────────────────────────
 
-function OpenPositionsTable({ positions, onRefresh, onNavigate }) {
+function OpenPositionsTable({ positions, onRefresh, onNavigate, livePrices = {} }) {
     const [editingId, setEditingId] = useState(null);
     const [closingId, setClosingId] = useState(null);
 
@@ -498,12 +499,32 @@ function OpenPositionsTable({ positions, onRefresh, onNavigate }) {
                                     <div className="text-[11px] text-muted-foreground">{pos.shares} sh</div>
                                 </td>
                                 <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
-                                    {pos.current_price != null ? fmt$(pos.current_price) : (
-                                        <span className="text-muted-foreground/50">—</span>
-                                    )}
+                                    {(() => {
+                                        const lp = livePrices[pos.ticker];
+                                        const livePrice = lp?.price ?? pos.current_price;
+                                        if (livePrice == null) return <span className="text-muted-foreground/50">—</span>;
+                                        return (
+                                            <span className="flex items-center justify-end gap-1">
+                                                {fmt$(livePrice)}
+                                                {lp?.price != null && (
+                                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Live price" />
+                                                )}
+                                            </span>
+                                        );
+                                    })()}
                                 </td>
                                 <td className="px-4 py-3 text-right">
-                                    <PnlCell pnl={pos.unrealized_pnl} pnlPct={pos.unrealized_pnl_pct} />
+                                    {(() => {
+                                        const lp = livePrices[pos.ticker];
+                                        const livePrice = lp?.price ?? pos.current_price;
+                                        const liveUnrealizedPct = pos.entry_price
+                                            ? ((livePrice - pos.entry_price) / pos.entry_price * 100)
+                                            : pos.unrealized_pnl_pct;
+                                        const liveUnrealizedPnl = pos.entry_price && pos.shares
+                                            ? (livePrice - pos.entry_price) * pos.shares
+                                            : pos.unrealized_pnl;
+                                        return <PnlCell pnl={liveUnrealizedPnl} pnlPct={liveUnrealizedPct} />;
+                                    })()}
                                 </td>
                                 <td className="px-4 py-3 text-right tabular-nums text-xs text-red-400">
                                     {pos.stop_loss != null ? fmt$(pos.stop_loss) : (
@@ -716,6 +737,9 @@ export default function Portfolio({ onNavigate }) {
     const [loading, setLoading]     = useState(true);
     const [error, setError]         = useState(null);
 
+    const openTickers = positions.map(p => p.ticker);
+    const { prices: livePrices } = useLivePrices(openTickers);
+
     const loadAll = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -833,6 +857,7 @@ export default function Portfolio({ onNavigate }) {
                         positions={positions}
                         onRefresh={loadAll}
                         onNavigate={onNavigate}
+                        livePrices={livePrices}
                     />
                 )}
             </div>

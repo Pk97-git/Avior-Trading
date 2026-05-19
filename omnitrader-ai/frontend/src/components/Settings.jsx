@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { agentsApi } from '../api';
-import { Loader2, RefreshCw, CheckCircle2, XCircle, Clock, Database, Key } from 'lucide-react';
+import { Loader2, RefreshCw, CheckCircle2, XCircle, Clock, Database, Key, Bell } from 'lucide-react';
 
 function StatusDot({ ok }) {
     return ok
@@ -204,6 +204,47 @@ export default function Settings() {
                             })}
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            {/* ── Notification Configuration ── */}
+            <div className="rounded-xl border border-border bg-card/50 p-5">
+                <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-muted-foreground" /> Notification Configuration
+                </h3>
+                <div className="space-y-2.5 mb-4">
+                    <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                            <StatusDot ok={data?.notification_channels?.slack} />
+                            <span className="font-medium">Slack</span>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                            data?.notification_channels?.slack
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : 'bg-muted text-muted-foreground'
+                        }`}>
+                            {data?.notification_channels?.slack ? 'Configured' : 'Not set'}
+                        </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                            <StatusDot ok={data?.notification_channels?.email} />
+                            <span className="font-medium">Email (SMTP)</span>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                            data?.notification_channels?.email
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : 'bg-muted text-muted-foreground'
+                        }`}>
+                            {data?.notification_channels?.email ? 'Configured' : 'Not set'}
+                        </span>
+                    </div>
+                </div>
+                <div className="text-xs text-muted-foreground mt-4 bg-muted/20 p-3 rounded-lg space-y-1">
+                    <p className="mb-2">Set these environment variables to enable notifications:</p>
+                    <div><code className="font-mono bg-background px-1 rounded">SLACK_WEBHOOK_URL</code> — Slack incoming webhook URL</div>
+                    <div><code className="font-mono bg-background px-1 rounded">ALERT_EMAIL_TO</code> — recipient email address</div>
+                    <div><code className="font-mono bg-background px-1 rounded">SMTP_HOST</code> / <code className="font-mono bg-background px-1 rounded">SMTP_PORT</code> / <code className="font-mono bg-background px-1 rounded">SMTP_USER</code> / <code className="font-mono bg-background px-1 rounded">SMTP_PASS</code> — SMTP server config</div>
                 </div>
             </div>
 
