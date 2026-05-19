@@ -1,0 +1,349 @@
+from typing import Optional, List, Dict, Tuple
+"""
+agents/runner.py
+================
+run_all_agents() — orchestrates all 10 agents + ExecutiveTrader for a
+single ticker, persists the result to AIAnalysis, and fires an Alert
+if the signal has changed — with 4-hour cooldown deduplication.
+
+Agent Pipeline:
+  Phase 1 Core:    Fundamental, Technical, Macro, Institutional, Sentiment, Memory, Vision
+  Phase 2 Strategist: Factor, CrossAsset, (Portfolio for context)
+  Phase 3 Risk:    CalibrationEngine, SizingEngine, ExecutionModel
+  Executive:       Regime-adaptive weighted combination
+
+Alert Gating:
+  - Only fires if signal CHANGED, OR
+  - Same signal but last alert > ALERT_COOLDOWN_HOURS ago
+  - Deduplicates within 24h for same ticker + signal + score range (±5)
+"""
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.models.market_data import AIAnalysis, Alert, Stock
+from app.agents.fundamental import FundamentalAgent
+from app.agents.technical import TechnicalAgent
+from app.agents.macro import MacroAgent
+from app.agents.institutional import InstitutionalAgent
+from app.agents.sentiment import SentimentAgent
+from app.agents.memory import MemoryAgent
+from app.agents.vision import VisionAgent
+from app.agents.factor import FactorAgent
+from app.agents.cross_asset import CrossAssetAgent
+from app.agents.portfolio import PortfolioAgent
+from app.agents.calibration import CalibrationEngine
+from app.agents.sizing import SizingEngine
+from app.agents.execution import ExecutionModel
+from app.agents.executive import ExecutiveTrader
+
+logger = logging.getLogger(__name__)
+
+ALERT_COOLDOWN_HOURS  = 4
+ALERT_DEDUP_HOURS     = 24
+ALERT_SCORE_TOLERANCE = 5   # within ±5 points = "same" for dedup purposes
+
+
+async def _previous_signal(db: AsyncSession, ticker: str) -> Optional[str]:
+    stmt = (
+        select(AIAnalysis.signal)
+        .where(AIAnalysis.ticker == ticker)
+        .order_by(AIAnalysis.analysis_date.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    row = result.fetchone()
+    return row.signal if row else None
+
+
+async def _upsert_analysis(db: AsyncSession, ticker: str, analysis_date: datetime, data: dict) -> None:
+    safe_data = {k: v for k, v in data.items() if hasattr(AIAnalysis, k)}
+    stmt = pg_insert(AIAnalysis).values(
+        ticker=ticker,
+        analysis_date=analysis_date,
+        **safe_data,
+    ).on_conflict_do_update(
+        index_elements=["ticker", "analysis_date"],
+        set_=safe_data,
+    )
+    await db.execute(stmt)
+
+
+async def _should_create_alert(
+    db: AsyncSession,
+    ticker: str,
+    signal: str,
+    previous_signal: Optional[str],
+    final_score: int,
+) -> bool:
+    """
+    Returns True if an alert should be created.
+    Rules:
+      1. Signal changed → always alert
+      2. Same signal → only alert if:
+         a. No alert in last ALERT_COOLDOWN_HOURS
+         b. AND no duplicate (same ticker, signal, score ±5) in last ALERT_DEDUP_HOURS
+    """
+    if previous_signal != signal:
+        return True   # Signal changed — always fire
+
+    cutoff_cooldown = datetime.now(timezone.utc) - timedelta(hours=ALERT_COOLDOWN_HOURS)
+    cutoff_dedup    = datetime.now(timezone.utc) - timedelta(hours=ALERT_DEDUP_HOURS)
+
+    # Check cooldown
+    res = await db.execute(text("""
+        SELECT COUNT(*) FROM alerts
+        WHERE ticker = :ticker AND generated_at >= :cutoff
+    """), {"ticker": ticker, "cutoff": cutoff_cooldown})
+    recent_count = res.scalar()
+    if recent_count and recent_count > 0:
+        logger.info("[AlertGate] %s: same signal, within cooldown window — suppressed.", ticker)
+        return False
+
+    # Check dedup (same score range)
+    res = await db.execute(text("""
+        SELECT COUNT(*) FROM alerts
+        WHERE ticker = :ticker AND signal = :signal
+          AND ABS(final_score - :score) <= :tol
+          AND generated_at >= :dedup_cutoff
+    """), {
+        "ticker": ticker,
+        "signal": signal,
+        "score": final_score,
+        "tol": ALERT_SCORE_TOLERANCE,
+        "dedup_cutoff": cutoff_dedup,
+    })
+    dup_count = res.scalar()
+    if dup_count and dup_count > 0:
+        logger.info("[AlertGate] %s: duplicate alert suppressed (same signal+score within 24h).", ticker)
+        return False
+
+    return True
+
+
+async def _create_alert(
+    db: AsyncSession,
+    ticker: str,
+    signal: str,
+    previous_signal: Optional[str],
+    final_score: int,
+    signal_thesis: list[str],
+) -> None:
+    direction = "new" if previous_signal is None else f"{previous_signal} → {signal}"
+    headline  = f"{ticker}: signal {direction} (score {final_score}/100)"
+    alert = Alert(
+        ticker=ticker,
+        generated_at=datetime.now(timezone.utc),
+        signal=signal,
+        previous_signal=previous_signal,
+        final_score=final_score,
+        headline=headline,
+        thesis=signal_thesis[:5],
+        is_read=False,
+    )
+    db.add(alert)
+
+
+async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
+    """
+    Run all agents for `ticker`. Returns full analysis dict.
+    Also persists result and fires a gated alert if warranted.
+    """
+    ticker = ticker.upper()
+    logger.info("Running all agents for %s", ticker)
+
+    analysis_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # ── Phase 1: Core agents (run sequentially to avoid asyncpg session conflicts) ──
+    try:
+        fund_result = await FundamentalAgent(db, ticker).analyze()
+    except Exception as e:
+        fund_result = e
+
+    try:
+        tech_result = await TechnicalAgent(db, ticker).analyze()
+    except Exception as e:
+        tech_result = e
+
+    try:
+        macro_result = await MacroAgent(db, ticker).analyze()
+    except Exception as e:
+        macro_result = e
+
+    try:
+        inst_result = await InstitutionalAgent(db, ticker).analyze()
+    except Exception as e:
+        inst_result = e
+
+    try:
+        sent_result = await SentimentAgent(db, ticker).analyze()
+    except Exception as e:
+        sent_result = e
+
+    try:
+        mem_result = await MemoryAgent(db, ticker).analyze()
+    except Exception as e:
+        mem_result = e
+
+    try:
+        vision_result = await VisionAgent(db, ticker).analyze()
+    except Exception as e:
+        vision_result = e
+
+    def _safe(result, default_score=50, name=""):
+        if isinstance(result, Exception):
+            logger.error("Agent %s failed for %s: %s", name, ticker, result)
+            return {"score": default_score, "thesis": [f"{name} agent failed."]}
+        return result
+
+    fund_result   = _safe(fund_result,   name="Fundamental")
+    tech_result   = _safe(tech_result,   name="Technical")
+    macro_result  = _safe(macro_result,  name="Macro")
+    inst_result   = _safe(inst_result,   name="Institutional")
+    sent_result   = _safe(sent_result,   name="Sentiment")
+    mem_result    = _safe(mem_result,    name="Memory")
+    vision_result = _safe(vision_result, name="Vision")
+
+    regime = macro_result.get("regime", "Unknown")
+
+    # ── Phase 2: Strategist agents (run sequentially to avoid asyncpg conflicts) ──
+    try:
+        factor_result = await FactorAgent(db, ticker).analyze()
+    except Exception as e:
+        factor_result = e
+
+    try:
+        cross_asset_result = await CrossAssetAgent(db, ticker).analyze()
+    except Exception as e:
+        cross_asset_result = e
+
+    try:
+        portfolio_result = await PortfolioAgent(db, ticker).analyze()
+    except Exception as e:
+        portfolio_result = e
+
+    factor_result       = _safe(factor_result,       name="Factor") if isinstance(factor_result, Exception) else factor_result
+    cross_asset_result  = _safe(cross_asset_result,  name="CrossAsset") if isinstance(cross_asset_result, Exception) else cross_asset_result
+    portfolio_result    = _safe(portfolio_result,    name="Portfolio") if isinstance(portfolio_result, Exception) else portfolio_result
+
+    # ── Load walk-forward weight nudges (written by WalkForwardValidator weekly) ──
+    weight_nudge: dict[str, float] = {}
+    try:
+        nudge_res = await db.execute(text("""
+            SELECT indicator, value FROM macro_data
+            WHERE indicator LIKE 'WEIGHT_NUDGE_%'
+              AND source = 'walk_forward_validator'
+              AND time >= NOW() - INTERVAL '7 days'
+            ORDER BY time DESC
+        """))
+        seen: set[str] = set()
+        for row in nudge_res.fetchall():
+            agent = row.indicator.replace("WEIGHT_NUDGE_", "").lower()
+            if agent not in seen:
+                weight_nudge[agent] = float(row.value)
+                seen.add(agent)
+    except Exception:
+        pass  # Fall back to static REGIME_WEIGHTS
+
+    # ── ExecutiveTrader (regime-adaptive) ───────────────────────────────────
+    executive = ExecutiveTrader()
+    exec_result = executive.decide(
+        fundamental_score   = fund_result["score"],
+        technical_score     = tech_result["score"],
+        macro_score         = macro_result["score"],
+        institutional_score = inst_result["score"],
+        sentiment_score     = sent_result["score"],
+        vision_score        = vision_result.get("score", 50),
+        factor_score        = factor_result.get("score", 50),
+        fundamental_thesis   = fund_result.get("thesis"),
+        technical_thesis     = tech_result.get("thesis"),
+        macro_thesis         = macro_result.get("thesis"),
+        institutional_thesis = inst_result.get("thesis"),
+        sentiment_thesis     = sent_result.get("thesis"),
+        vision_thesis        = vision_result.get("thesis"),
+        factor_thesis        = factor_result.get("thesis"),
+        regime               = regime,
+        weight_nudge         = weight_nudge or None,
+    )
+
+    # ── Phase 3: Risk sizing pipeline ───────────────────────────────────────
+    calibrator = CalibrationEngine(db)
+    await calibrator.fit()
+    calibrated_prob = calibrator.predict(exec_result["final_score"])
+
+    sizing = SizingEngine(db, ticker)
+    sizing_result = await sizing.compute(calibrated_prob, exec_result["final_score"])
+
+    execution = ExecutionModel(db, ticker)
+    exec_cost_result = await execution.adjust(sizing_result["kelly_fraction"])
+
+    final_kelly = exec_cost_result["adjusted_kelly"]
+    final_position_pct = round(final_kelly * 100, 2)
+
+    # ── Assemble full analysis dict ─────────────────────────────────────────
+    data = {
+        # Core scores
+        "fundamental_score":       fund_result["score"],
+        "technical_score":         tech_result["score"],
+        "macro_score":             macro_result["score"],
+        "institutional_score":     inst_result["score"],
+        "sentiment_score":         sent_result["score"],
+        "memory_confidence":       mem_result.get("confidence", 0.0),
+        "vision_score":            vision_result.get("score", 50),
+        "final_score":             exec_result["final_score"],
+        "signal":                  exec_result["signal"],
+        "regime":                  regime,
+        # Theses
+        "fundamental_thesis":      fund_result.get("thesis", []),
+        "technical_thesis":        tech_result.get("thesis", []),
+        "macro_thesis":            macro_result.get("thesis", []),
+        "institutional_thesis":    inst_result.get("thesis", []),
+        "sentiment_thesis":        sent_result.get("thesis", []),
+        "memory_thesis":           mem_result.get("thesis", []),
+        "vision_thesis":           vision_result.get("thesis", []),
+        "signal_thesis":           exec_result["signal_thesis"],
+        # Phase 2 extras
+        "factor_scores":           factor_result.get("factor_scores", {}),
+        "cross_asset_sensitivity": cross_asset_result.get("cross_asset_sensitivity", {}),
+        # Phase 3 risk
+        "calibrated_prob":         calibrated_prob,
+        "kelly_fraction":          final_kelly,
+        "max_position_pct":        final_position_pct,
+    }
+
+    # ── Persist ──────────────────────────────────────────────────────────────
+    try:
+        previous = await _previous_signal(db, ticker)
+        await _upsert_analysis(db, ticker, analysis_date, data)
+
+        if await _should_create_alert(db, ticker, exec_result["signal"], previous, exec_result["final_score"]):
+            await _create_alert(
+                db, ticker,
+                signal=exec_result["signal"],
+                previous_signal=previous,
+                final_score=exec_result["final_score"],
+                signal_thesis=exec_result["signal_thesis"],
+            )
+
+        await db.commit()
+        logger.info("Saved analysis for %s: signal=%s score=%d kelly=%.1f%%",
+                    ticker, exec_result["signal"], exec_result["final_score"], final_position_pct)
+
+    except Exception as e:
+        await db.rollback()
+        logger.error("Failed to persist analysis for %s: %s", ticker, e)
+
+    return {
+        "ticker": ticker,
+        "analysis_date": analysis_date.isoformat(),
+        **data,
+        # Extra fields not in DB columns (returned to API caller only)
+        "portfolio_diversification": portfolio_result.get("diversification_score"),
+        "correlated_peer": portfolio_result.get("correlated_peer"),
+        "execution_note": exec_cost_result.get("execution_note"),
+        "volatility_note": sizing_result.get("volatility_note"),
+    }

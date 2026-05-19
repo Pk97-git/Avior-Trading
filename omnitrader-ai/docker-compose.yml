@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: omnitrader_db
+    environment:
+      POSTGRES_USER: omnitrader
+      POSTGRES_PASSWORD: omnitrader
+      POSTGRES_DB: omnitrader_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/home/postgres/pgdata/data
+    restart: always
+
+  prefect-server:
+    image: prefecthq/prefect:2-latest
+    container_name: prefect_server
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_UI_URL: http://localhost:4200/api
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: omnitrader_redis
+    ports:
+      - "6379:6379"
+    restart: always
