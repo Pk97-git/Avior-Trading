@@ -31,6 +31,7 @@ from app.api import backtest as backtest_router
 from app.api import portfolio as portfolio_router
 from app.api import circuit_breaker as circuit_breaker_router
 from app.api import prices_sse as prices_sse_router
+from app.api import orders as orders_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -158,7 +159,7 @@ async def lifespan(app: FastAPI):
         from app.models.market_data import (  # noqa: F401 — ensure all models registered
             Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
             NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
-            ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition,
+            ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -249,6 +250,7 @@ app.include_router(backtest_router.router,     prefix="/api/v1/backtest",  tags=
 app.include_router(portfolio_router.router,        prefix="/api/v1/portfolio",        tags=["portfolio"])
 app.include_router(circuit_breaker_router.router,  prefix="/api/v1/circuit-breaker",  tags=["circuit-breaker"])
 app.include_router(prices_sse_router.router,       prefix="/api/v1/prices",           tags=["prices"])
+app.include_router(orders_router.router,           prefix="/api/v1/orders",           tags=["orders"])
 
 import os
 from fastapi.staticfiles import StaticFiles

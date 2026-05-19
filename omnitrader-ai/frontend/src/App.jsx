@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase } from 'lucide-react';
+import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase, ShoppingCart } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
 import Dashboard from './components/Dashboard';
@@ -9,6 +9,7 @@ import Compounders from './components/Compounders';
 import LiveJobsView from './components/LiveJobsView';
 import Watchlist from './components/Watchlist';
 import Portfolio from './components/Portfolio';
+import Orders from './components/Orders';
 import SignalPerformance from './components/SignalPerformance';
 import SettingsPage from './components/Settings';
 import SwingSetups from './components/SwingSetups';
@@ -20,6 +21,7 @@ const TABS = [
     { id: 'swing',       label: 'Swing Setups',        icon: TrendingUp },
     { id: 'watchlist',   label: 'Watchlist',           icon: Star },
     { id: 'portfolio',   label: 'Portfolio',           icon: Briefcase },
+    { id: 'orders',      label: 'Orders',              icon: ShoppingCart },
     { id: 'performance', label: 'Signal Performance',  icon: BarChart2 },
     { id: 'backtest',    label: 'Backtest',             icon: FlaskConical },
     { id: 'market',      label: 'Market Analysis',     icon: Activity },
@@ -113,6 +115,9 @@ export default function App() {
                     )}
                     {activeTab === 'portfolio' && (
                         <Portfolio onNavigate={handleNavigate} />
+                    )}
+                    {activeTab === 'orders' && (
+                        <Orders onNavigate={handleNavigate} />
                     )}
                     {activeTab === 'performance' && (
                         <SignalPerformance />

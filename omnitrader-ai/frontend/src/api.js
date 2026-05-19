@@ -68,4 +68,15 @@ export const circuitBreakerApi = {
     getStatus: () => api.get('/circuit-breaker/status'),
 };
 
+export const ordersApi = {
+    submitFromAnalysis: (ticker, body = {}) => api.post(`/orders/submit/${ticker.toUpperCase()}`, body),
+    submitManual: (body) => api.post('/orders/manual', body),
+    listOrders: (params = {}) => api.get('/orders', { params }),
+    getOrder: (id) => api.get(`/orders/${id}`),
+    cancelOrder: (id) => api.post(`/orders/${id}/cancel`),
+    getBrokerBalance: (country = 'US') => api.get('/orders/broker/balance', { params: { country } }),
+    getBrokerPositions: (country = 'US') => api.get('/orders/broker/positions', { params: { country } }),
+    syncBroker: () => api.post('/orders/broker/sync'),
+};
+
 export default api;

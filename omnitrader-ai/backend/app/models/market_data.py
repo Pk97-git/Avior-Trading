@@ -6,6 +6,7 @@ from app.db.base import Base
 import datetime
 
 
+
 class Stock(Base):
     __tablename__ = "stocks"
 
@@ -278,4 +279,33 @@ class PortfolioPosition(Base):
 
     __table_args__ = (
         Index("ix_portfolio_ticker_open", "ticker", "is_open"),
+    )
+
+
+class Order(Base):
+    """Tracks all order submissions — paper, Zerodha, and Alpaca."""
+    __tablename__ = "orders"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    ticker          = Column(String, ForeignKey("stocks.ticker"), nullable=False, index=True)
+    created_at      = Column(DateTime(timezone=True), index=True)
+    side            = Column(String)          # BUY / SELL
+    order_type      = Column(String)          # MARKET / LIMIT
+    qty             = Column(Float)           # shares / units requested
+    limit_price     = Column(Float)           # None for MARKET orders
+    broker          = Column(String)          # PAPER / ZERODHA / ALPACA
+    broker_order_id = Column(String)          # ID returned by the broker
+    status          = Column(String, default="PENDING")  # PENDING / FILLED / CANCELLED / REJECTED
+    filled_qty      = Column(Float)
+    filled_price    = Column(Float)
+    filled_at       = Column(DateTime(timezone=True))
+    signal          = Column(String)          # the AI signal that triggered this order
+    final_score     = Column(Integer)
+    notes           = Column(Text)
+    portfolio_position_id = Column(Integer, ForeignKey("portfolio_positions.id"), nullable=True)
+
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        Index("ix_orders_ticker_status", "ticker", "status"),
     )

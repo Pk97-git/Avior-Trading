@@ -6,7 +6,7 @@ from app.db.base import Base
 from app.models.market_data import (
     Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
     NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
-    ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition,
+    ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations
@@ -22,6 +22,8 @@ _MIGRATIONS = [
     "ALTER TABLE ai_analysis ADD COLUMN IF NOT EXISTS stop_loss FLOAT",
     "ALTER TABLE ai_analysis ADD COLUMN IF NOT EXISTS take_profit FLOAT",
     "ALTER TABLE ai_analysis ADD COLUMN IF NOT EXISTS atr_14 FLOAT",
+    # Order table: portfolio_position_id added after initial orders schema
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS portfolio_position_id INTEGER",
 ]
 
 
