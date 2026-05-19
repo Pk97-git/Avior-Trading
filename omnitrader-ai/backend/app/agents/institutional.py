@@ -9,7 +9,7 @@ India tickers (.NS / .BO):
   • Promoter holding change from previous quarter (promoter_holdings)
 
 US tickers:
-  • Volume anomaly: 5-day avg vs 90-day avg from stock_prices
+  • Volume anomaly: vol_ratio from stock_technicals (pre-computed)
 
 Scoring rubric (starts at 50):
   Strong FII net buying (> +500 Cr aggregate)  → +20
@@ -69,38 +69,51 @@ class InstitutionalAgent:
         return rows[0].promoter_pct - rows[1].promoter_pct
 
     async def _volume_anomaly(self) -> Optional[float]:
-        """
-        Ratio of 5-day avg volume to 90-day avg volume.
-        > 2.0 = volume spike; < 0.5 = drought.
-        """
-        query = text("""
-            SELECT AVG(volume) AS avg_vol, COUNT(*) AS n
-            FROM (
-                SELECT volume FROM stock_prices
-                WHERE ticker = :ticker AND volume IS NOT NULL
-                ORDER BY time DESC
-                LIMIT 90
-            ) t
-        """)
-        r90 = await self.db.execute(query, {"ticker": self.ticker})
-        row90 = r90.fetchone()
-        if not row90 or not row90.avg_vol or row90.n < 20:
-            return None
+        """Volume ratio vs 20-day avg (pre-computed in stock_technicals)."""
+        result = await self.db.execute(text("""
+            SELECT vol_ratio FROM stock_technicals
+            WHERE ticker = :ticker AND vol_ratio IS NOT NULL
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        row = result.fetchone()
+        return row.vol_ratio if row else None
 
-        query5 = text("""
-            SELECT AVG(volume) AS avg_vol FROM (
-                SELECT volume FROM stock_prices
-                WHERE ticker = :ticker AND volume IS NOT NULL
-                ORDER BY time DESC
-                LIMIT 5
-            ) t
-        """)
-        r5 = await self.db.execute(query5, {"ticker": self.ticker})
-        row5 = r5.fetchone()
-        if not row5 or not row5.avg_vol:
+    async def _insider_signal(self) -> Optional[dict]:
+        """
+        Recent insider transactions from Form 4 filings (last 90 days).
+        Returns dict with purchase_count, sale_count, net_value, or None if no data.
+        """
+        result = await self.db.execute(text("""
+            SELECT transaction_type,
+                   COUNT(*) AS cnt,
+                   COALESCE(SUM(total_value), 0) AS total_val
+            FROM insider_transactions
+            WHERE ticker = :ticker
+              AND filed_date >= NOW() - INTERVAL '90 days'
+            GROUP BY transaction_type
+        """), {"ticker": self.ticker})
+        rows = result.fetchall()
+        if not rows:
             return None
+        data = {r.transaction_type: {"count": r.cnt, "value": float(r.total_val)} for r in rows}
+        return data
 
-        return row5.avg_vol / row90.avg_vol
+    async def _analyst_signal(self) -> Optional[dict]:
+        """
+        Recent analyst rating changes (last 30 days).
+        Returns dict with upgrade_count, downgrade_count, or None if no data.
+        """
+        result = await self.db.execute(text("""
+            SELECT action, COUNT(*) AS cnt
+            FROM analyst_ratings
+            WHERE ticker = :ticker
+              AND date >= NOW() - INTERVAL '30 days'
+            GROUP BY action
+        """), {"ticker": self.ticker})
+        rows = result.fetchall()
+        if not rows:
+            return None
+        return {r.action: r.cnt for r in rows}
 
     async def analyze(self) -> dict:
         """
@@ -169,6 +182,54 @@ class InstitutionalAgent:
             except Exception as e:
                 logger.warning("Volume anomaly fetch for %s: %s", self.ticker, e)
                 thesis.append("Volume data unavailable.")
+
+        # ── Insider transactions (both markets) ────────────────────────────────
+        try:
+            insider = await self._insider_signal()
+            if insider:
+                purchases = insider.get("P", {})
+                sales     = insider.get("S", {})
+                p_count   = purchases.get("count", 0)
+                s_count   = sales.get("count", 0)
+                p_val     = purchases.get("value", 0)
+
+                if p_count >= 3:
+                    score += 12
+                    thesis.append(f"Cluster insider buying: {p_count} purchases in last 90 days — strong insider conviction.")
+                elif p_count >= 1 and p_val > 100_000:
+                    score += 6
+                    thesis.append(f"Insider purchase >${p_val/1e6:.1f}M in last 90 days — positive signal.")
+                elif s_count >= 3 and p_count == 0:
+                    score -= 8
+                    thesis.append(f"Insider selling: {s_count} sales in last 90 days — watch for distribution.")
+        except Exception as e:
+            logger.warning("Insider signal fetch for %s: %s", self.ticker, e)
+
+        # ── Analyst ratings (both markets) ────────────────────────────────────
+        try:
+            analyst = await self._analyst_signal()
+            if analyst:
+                upgrades   = analyst.get("upgrade", 0)
+                downgrades = analyst.get("downgrade", 0)
+                inits      = analyst.get("init", 0)
+
+                if upgrades >= 2:
+                    score += 8
+                    thesis.append(f"{upgrades} analyst upgrade(s) in last 30 days — bullish catalyst.")
+                elif upgrades >= 1:
+                    score += 4
+                    thesis.append(f"Analyst upgrade in last 30 days.")
+                if inits >= 1 and upgrades == 0:
+                    score += 3
+                    thesis.append(f"{inits} new analyst coverage initiation(s) — growing institutional attention.")
+                if downgrades >= 2:
+                    score -= 8
+                    thesis.append(f"{downgrades} analyst downgrade(s) in last 30 days — bearish signal.")
+                elif downgrades >= 1:
+                    score -= 4
+                    thesis.append(f"Analyst downgrade in last 30 days.")
+        except Exception as e:
+            logger.warning("Analyst signal fetch for %s: %s", self.ticker, e)
 
         score = max(0, min(100, score))
         logger.info("InstitutionalAgent %s: score=%d", self.ticker, score)

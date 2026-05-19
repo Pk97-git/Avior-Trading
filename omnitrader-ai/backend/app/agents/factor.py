@@ -19,7 +19,6 @@ Returns:
     }
 """
 import logging
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -73,16 +72,6 @@ class FactorAgent:
         """), {"t": self.ticker})
         row = res.fetchone()
         return dict(row._mapping) if row else None
-
-    async def _price_history(self, days: int = 365) -> list[float]:
-        """Fetch close prices for the last N days."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-        res = await self.db.execute(text("""
-            SELECT close FROM stock_prices
-            WHERE ticker = :t AND time >= :since
-            ORDER BY time ASC
-        """), {"t": self.ticker, "since": since})
-        return [r.close for r in res.fetchall() if r.close is not None]
 
     async def _universe_pe_stats(self) -> tuple[float, float]:
         """Get universe-wide mean and stddev of P/E ratios for normalisation."""
@@ -140,28 +129,40 @@ class FactorAgent:
         return round((rev_z + eps_z) / 2, 3)
 
     async def _momentum_score(self) -> Optional[float]:
-        """Momentum: 12-1 month return (skip most recent month to avoid reversal)."""
-        prices = await self._price_history(days=380)
-        if len(prices) < 60:
+        """Momentum: RS vs benchmark (pre-computed 63-day) + 52-week high proximity."""
+        is_india = self.ticker.endswith(".NS") or self.ticker.endswith(".BO")
+
+        res = await self.db.execute(text("""
+            SELECT rs_vs_spx, rs_vs_nsei, week_52_high
+            FROM stock_technicals
+            WHERE ticker = :t
+            ORDER BY date DESC LIMIT 1
+        """), {"t": self.ticker})
+        row = res.fetchone()
+
+        if not row:
             return None
 
-        # Price 12 months ago and 1 month ago
-        p_12m = prices[0]
-        p_1m  = prices[-22] if len(prices) >= 22 else prices[-1]
-        p_now  = prices[-1]
-
-        if p_12m <= 0 or p_1m <= 0:
+        rs = row.rs_vs_nsei if is_india else row.rs_vs_spx
+        if rs is None:
             return None
 
-        momentum_12_1 = (p_1m - p_12m) / p_12m   # 12m-1m return
+        # rs is ratio: stock_3m_return / benchmark_3m_return
+        # rs=1.5 means stock outperformed by 50% of benchmark return → +1z
+        z = min(2.0, max(-2.0, (rs - 1.0) / 0.5))
 
-        # Universe average momentum (approx 10% annualised)
-        z = min(2.0, max(-2.0, (momentum_12_1 - 0.10) / 0.25))
-
-        # Near 52-week high bonus
-        high_52w = max(prices[-252:]) if len(prices) >= 252 else max(prices)
-        proximity = p_now / high_52w if high_52w > 0 else 0.5
-        bonus = 0.3 if proximity > 0.90 else 0.0
+        # 52-week high proximity bonus: need current price
+        bonus = 0.0
+        if row.week_52_high and row.week_52_high > 0:
+            price_res = await self.db.execute(text("""
+                SELECT close FROM stock_prices
+                WHERE ticker = :t AND close IS NOT NULL
+                ORDER BY time DESC LIMIT 1
+            """), {"t": self.ticker})
+            price_row = price_res.fetchone()
+            if price_row and price_row.close:
+                proximity = price_row.close / row.week_52_high
+                bonus = 0.3 if proximity > 0.90 else 0.0
 
         return round(z + bonus, 3)
 
