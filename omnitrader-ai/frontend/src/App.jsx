@@ -25,6 +25,7 @@ import RiskDashboard from './components/RiskDashboard';
 import DailyBriefing from './components/DailyBriefing';
 import InsiderActivity from './components/InsiderActivity';
 import AnalystRatings from './components/AnalystRatings';
+import EconomicCalendar from './components/EconomicCalendar';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -41,6 +42,7 @@ const TABS = [
     { id: 'options',      label: 'Options Flow',        icon: Layers },
     { id: 'insiders',     label: 'Insider Activity',    icon: Users },
     { id: 'analysts',     label: 'Analyst Ratings',     icon: Star },
+    { id: 'econCalendar', label: 'Economic Calendar',   icon: Calendar },
     { id: 'sectors',      label: 'Sector Rotation',     icon: BarChart },
     // ── Risk & Analytics ──────────────────────────────────────
     { id: 'risk',         label: 'Risk Dashboard',      icon: ShieldAlert },
@@ -61,7 +63,7 @@ const TAB_LABELS = Object.fromEntries(TABS.map(t => [t.id, t.label]));
 const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
-    { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'sectors'] },
+    { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
     { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
     { label: 'Research',       ids: ['market', 'compounders'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
@@ -158,6 +160,7 @@ export default function App() {
                     {activeTab === 'options'     && <OptionsFlow onNavigate={handleNavigate} />}
                     {activeTab === 'insiders'    && <InsiderActivity onNavigate={handleNavigate} />}
                     {activeTab === 'analysts'    && <AnalystRatings onNavigate={handleNavigate} />}
+                    {activeTab === 'econCalendar' && <EconomicCalendar />}
                     {activeTab === 'sectors'     && <SectorRotation />}
                     {activeTab === 'risk'        && <RiskDashboard />}
                     {activeTab === 'performance' && <SignalPerformance />}
