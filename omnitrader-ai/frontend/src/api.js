@@ -103,6 +103,11 @@ export const riskApi = {
     getTickerRs:         (ticker) => api.get(`/risk/rs-rankings/${ticker.toUpperCase()}`),
 };
 
+export const briefingApi = {
+    getDaily:  (force = false) => api.get('/briefing/daily', { params: force ? { force: true } : {} }),
+    refresh:   () => api.post('/briefing/refresh'),
+};
+
 export const trailingStopsApi = {
     run:         () => api.post('/trailing-stops/run'),
     runSingle:   (positionId) => api.post(`/trailing-stops/${positionId}`),

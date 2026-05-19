@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
     LayoutDashboard, Database, Activity, Settings, Globe, Zap,
     Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase,
-    ShoppingCart, Calendar, Layers, ShieldAlert, BarChart,
+    ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper,
 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
@@ -22,10 +22,12 @@ import EarningsCalendar from './components/EarningsCalendar';
 import OptionsFlow from './components/OptionsFlow';
 import SectorRotation from './components/SectorRotation';
 import RiskDashboard from './components/RiskDashboard';
+import DailyBriefing from './components/DailyBriefing';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
-    { id: 'dashboard',    label: 'Executive Dashboard', icon: LayoutDashboard },
+    { id: 'briefing',     label: 'Daily Briefing',      icon: Newspaper },
+    { id: 'dashboard',    label: 'Dashboard',           icon: LayoutDashboard },
     { id: 'hub',          label: 'Intelligence Hub',    icon: Zap },
     { id: 'swing',        label: 'Swing Setups',        icon: TrendingUp },
     // ── Positions ─────────────────────────────────────────────
@@ -53,7 +55,7 @@ const TAB_LABELS = Object.fromEntries(TABS.map(t => [t.id, t.label]));
 
 // Grouped sidebar sections for visual clarity
 const NAV_GROUPS = [
-    { label: 'Core',           ids: ['dashboard', 'hub', 'swing'] },
+    { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'sectors'] },
     { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
@@ -77,7 +79,7 @@ function NavItem({ icon: Icon, label, active, onClick }) {
 }
 
 export default function App() {
-    const [activeTab, setActiveTab] = useState('dashboard');
+    const [activeTab, setActiveTab] = useState('briefing');
     const [hubTicker, setHubTicker] = useState(null);
 
     const handleNavigate = (tab, extra = null) => {
@@ -141,6 +143,7 @@ export default function App() {
                 </header>
 
                 <div className="p-6">
+                    {activeTab === 'briefing'    && <DailyBriefing onNavigate={handleNavigate} />}
                     {activeTab === 'dashboard'   && <Dashboard onNavigate={handleNavigate} />}
                     {activeTab === 'hub'         && <IntelligenceHub key={hubTicker} initialTicker={hubTicker} />}
                     {activeTab === 'swing'       && <SwingSetups onNavigate={handleNavigate} />}

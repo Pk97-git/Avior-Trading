@@ -38,6 +38,7 @@ from app.api import sectors as sectors_router
 from app.api import risk as risk_router
 from app.api import earnings as earnings_router
 from app.api import options as options_router
+from app.api import briefing as briefing_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -282,6 +283,7 @@ app.include_router(sectors_router.router,          prefix="/api/v1/sectors",    
 app.include_router(risk_router.router,             prefix="/api/v1/risk",              tags=["risk"])
 app.include_router(earnings_router.router,         prefix="/api/v1/earnings",          tags=["earnings"])
 app.include_router(options_router.router,          prefix="/api/v1/options",           tags=["options"])
+app.include_router(briefing_router.router,         prefix="/api/v1/briefing",          tags=["briefing"])
 
 import os
 from fastapi.staticfiles import StaticFiles
