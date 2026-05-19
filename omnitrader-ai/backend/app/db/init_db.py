@@ -6,7 +6,7 @@ from app.db.base import Base
 from app.models.market_data import (
     Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
     NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
-    ChartSnapshot, AIAnalysis, Alert, Watchlist,
+    ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations

@@ -55,4 +55,17 @@ export const watchlistApi = {
     updateEntry: (ticker, updates) => api.patch(`/watchlist/${ticker.toUpperCase()}`, updates),
 };
 
+export const portfolioApi = {
+    getPositions: () => api.get('/portfolio'),
+    getSummary:   () => api.get('/portfolio/summary'),
+    getHistory:   (page = 1, limit = 20) => api.get('/portfolio/history', { params: { page, limit } }),
+    openPosition: (ticker, data) => api.post(`/portfolio/${ticker.toUpperCase()}`, data),
+    updatePosition: (id, data) => api.patch(`/portfolio/${id}`, data),
+    closePosition:  (id, data) => api.post(`/portfolio/${id}/close`, data),
+};
+
+export const circuitBreakerApi = {
+    getStatus: () => api.get('/circuit-breaker/status'),
+};
+
 export default api;

@@ -28,6 +28,9 @@ from app.api import ingestion, agents
 from app.api import signals as signals_router
 from app.api import watchlist as watchlist_router
 from app.api import backtest as backtest_router
+from app.api import portfolio as portfolio_router
+from app.api import circuit_breaker as circuit_breaker_router
+from app.api import prices_sse as prices_sse_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -145,7 +148,7 @@ async def lifespan(app: FastAPI):
         from app.models.market_data import (  # noqa: F401 — ensure all models registered
             Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
             NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
-            ChartSnapshot, AIAnalysis, Alert, Watchlist,
+            ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -229,6 +232,9 @@ app.include_router(agents.router,              prefix="/api/v1/agents",    tags=
 app.include_router(signals_router.router,      prefix="/api/v1/agents",    tags=["signals"])
 app.include_router(watchlist_router.router,    prefix="/api/v1/watchlist", tags=["watchlist"])
 app.include_router(backtest_router.router,     prefix="/api/v1/backtest",  tags=["backtest"])
+app.include_router(portfolio_router.router,        prefix="/api/v1/portfolio",        tags=["portfolio"])
+app.include_router(circuit_breaker_router.router,  prefix="/api/v1/circuit-breaker",  tags=["circuit-breaker"])
+app.include_router(prices_sse_router.router,       prefix="/api/v1/prices",           tags=["prices"])
 
 import os
 from fastapi.staticfiles import StaticFiles

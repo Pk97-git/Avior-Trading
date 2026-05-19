@@ -231,3 +231,106 @@ class NotificationService:
             server.starttls()
             server.login(self.smtp_user, self.smtp_pass)  # type: ignore[arg-type]
             server.sendmail(self.smtp_user, self.email_to, msg.as_string())  # type: ignore[arg-type]
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Health alerts
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def send_health_alert(self, warnings: List[str]) -> None:
+        """
+        Fire a system-health notification to all configured channels.
+
+        Formats a structured message listing data-freshness warnings from
+        HealthMonitor. Never raises — errors are logged and swallowed.
+        """
+        if not warnings:
+            return
+
+        tasks = []
+        if self.slack_webhook:
+            tasks.append(self._send_health_slack(warnings))
+        if self.email_to and self.smtp_user and self.smtp_pass:
+            tasks.append(self._send_health_email(warnings))
+
+        if not tasks:
+            logger.debug("[Notifications] No channels configured — skipping health alert.")
+            return
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("[Notifications] Health alert channel error: %s", r)
+
+    async def _send_health_slack(self, warnings: List[str]) -> None:
+        """POST a formatted health-alert message to the Slack webhook."""
+        bullets = "\n".join(f"• {w}" for w in warnings)
+        text = (
+            f"⚠️ *OmniTrader Health Alert*\n"
+            f"The following data freshness issues were detected:\n"
+            f"{bullets}"
+        )
+        payload = {
+            "text": text,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text},
+                }
+            ],
+        }
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._post_slack, payload)
+        logger.info("[Notifications] Health alert sent to Slack (%d warnings)", len(warnings))
+
+    async def _send_health_email(self, warnings: List[str]) -> None:
+        """Send a health-alert email via SMTP."""
+        subject = f"[OmniTrader] System Health Alert — {len(warnings)} warning(s)"
+        plain, html = self._build_health_email_body(warnings)
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._smtp_send, subject, plain, html)
+        logger.info("[Notifications] Health alert email sent → %s", self.email_to)
+
+    def _build_health_email_body(self, warnings: List[str]) -> tuple[str, str]:
+        """Build plain-text and HTML bodies for a health-alert email."""
+        bullets_plain = "\n".join(f"  • {w}" for w in warnings)
+        bullets_html  = "".join(f"<li>{w}</li>" for w in warnings)
+
+        plain = (
+            f"OmniTrader AI — System Health Alert\n"
+            f"{'=' * 40}\n\n"
+            f"The following data freshness issues were detected:\n\n"
+            f"{bullets_plain}\n\n"
+            f"Please investigate promptly to ensure signal quality.\n\n"
+            f"{'—' * 40}\n"
+            f"This is an automated message from OmniTrader AI.\n"
+        )
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:24px;margin:0;">
+  <div style="max-width:560px;margin:auto;background:#1a1f2e;border-radius:12px;padding:24px;border:1px solid #2d3748;">
+    <h2 style="margin:0 0 8px 0;font-size:18px;color:#fbbf24;">
+      ⚠️ OmniTrader Health Alert
+    </h2>
+    <p style="margin:0 0 16px 0;color:#94a3b8;font-size:13px;">
+      The following data freshness issues were detected and require attention.
+    </p>
+
+    <h3 style="font-size:13px;color:#94a3b8;margin:0 0 8px 0;text-transform:uppercase;letter-spacing:.05em;">
+      Warnings
+    </h3>
+    <ul style="margin:0 0 20px 0;padding-left:20px;color:#fcd34d;font-size:14px;line-height:1.7;">
+      {bullets_html}
+    </ul>
+
+    <p style="font-size:11px;color:#475569;margin:0;border-top:1px solid #2d3748;padding-top:12px;">
+      This is an automated health report from OmniTrader AI.
+    </p>
+  </div>
+</body>
+</html>"""
+
+        return plain, html

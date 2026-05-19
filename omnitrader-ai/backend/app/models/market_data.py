@@ -249,3 +249,33 @@ class Watchlist(Base):
     __table_args__ = (
         Index("ix_watchlist_ticker_active", "ticker", "is_active"),
     )
+
+
+class PortfolioPosition(Base):
+    """Portfolio positions with full P&L tracking."""
+    __tablename__ = "portfolio_positions"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    ticker         = Column(String, ForeignKey("stocks.ticker"), nullable=False, index=True)
+    entry_date     = Column(DateTime(timezone=True), nullable=False)
+    entry_price    = Column(Float, nullable=False)
+    shares         = Column(Float, nullable=False)          # fractional allowed
+    position_value = Column(Float)                           # entry_price * shares
+    stop_loss      = Column(Float)
+    take_profit    = Column(Float)
+    signal         = Column(String)                          # STRONG_BUY / ACCUMULATE / etc
+    regime         = Column(String)                          # macro regime at entry
+    notes          = Column(Text)
+    # Closing fields
+    is_open            = Column(Boolean, default=True, index=True)
+    exit_date          = Column(DateTime(timezone=True))
+    exit_price         = Column(Float)
+    exit_reason        = Column(String)                      # MANUAL / STOP / TARGET / SIGNAL
+    realized_pnl       = Column(Float)                       # exit_value - entry_value
+    realized_pnl_pct   = Column(Float)
+
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        Index("ix_portfolio_ticker_open", "ticker", "is_open"),
+    )
