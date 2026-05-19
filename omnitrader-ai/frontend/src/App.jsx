@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
     LayoutDashboard, Database, Activity, Settings, Globe, Zap,
     Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase,
-    ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper,
+    ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper, Users,
 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
@@ -23,6 +23,8 @@ import OptionsFlow from './components/OptionsFlow';
 import SectorRotation from './components/SectorRotation';
 import RiskDashboard from './components/RiskDashboard';
 import DailyBriefing from './components/DailyBriefing';
+import InsiderActivity from './components/InsiderActivity';
+import AnalystRatings from './components/AnalystRatings';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -37,6 +39,8 @@ const TABS = [
     // ── Alpha ─────────────────────────────────────────────────
     { id: 'earnings',     label: 'Earnings Calendar',   icon: Calendar },
     { id: 'options',      label: 'Options Flow',        icon: Layers },
+    { id: 'insiders',     label: 'Insider Activity',    icon: Users },
+    { id: 'analysts',     label: 'Analyst Ratings',     icon: Star },
     { id: 'sectors',      label: 'Sector Rotation',     icon: BarChart },
     // ── Risk & Analytics ──────────────────────────────────────
     { id: 'risk',         label: 'Risk Dashboard',      icon: ShieldAlert },
@@ -57,7 +61,7 @@ const TAB_LABELS = Object.fromEntries(TABS.map(t => [t.id, t.label]));
 const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
-    { label: 'Alpha',          ids: ['earnings', 'options', 'sectors'] },
+    { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'sectors'] },
     { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
     { label: 'Research',       ids: ['market', 'compounders'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
@@ -152,6 +156,8 @@ export default function App() {
                     {activeTab === 'orders'      && <Orders onNavigate={handleNavigate} />}
                     {activeTab === 'earnings'    && <EarningsCalendar onNavigate={handleNavigate} />}
                     {activeTab === 'options'     && <OptionsFlow onNavigate={handleNavigate} />}
+                    {activeTab === 'insiders'    && <InsiderActivity onNavigate={handleNavigate} />}
+                    {activeTab === 'analysts'    && <AnalystRatings onNavigate={handleNavigate} />}
                     {activeTab === 'sectors'     && <SectorRotation />}
                     {activeTab === 'risk'        && <RiskDashboard />}
                     {activeTab === 'performance' && <SignalPerformance />}
