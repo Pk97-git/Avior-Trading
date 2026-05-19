@@ -425,3 +425,96 @@ class Dividend(Base):
     amount      = Column(Float)
     yield_fwd   = Column(Float)       # forward annual yield %
     div_cagr_5y = Column(Float)       # 5-year dividend growth CAGR %
+
+
+class IntradayPrice(Base):
+    """15-minute OHLCV bars for intraday analysis."""
+    __tablename__ = "intraday_prices"
+    __table_args__ = (
+        UniqueConstraint("ticker", "time", name="uq_intraday_ticker_time"),
+        Index("ix_intraday_ticker_time", "ticker", "time"),
+    )
+
+    id     = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    time   = Column(DateTime(timezone=True), nullable=False, index=True)
+    open   = Column(Float)
+    high   = Column(Float)
+    low    = Column(Float)
+    close  = Column(Float)
+    volume = Column(Float)
+
+
+class FoChainSnapshot(Base):
+    """NSE F&O option chain snapshot by strike (Nifty/BankNifty). Captured every 15 min during NSE session."""
+    __tablename__ = "fo_chain_snapshots"
+    __table_args__ = (
+        UniqueConstraint("symbol", "snapshot_time", "expiry", "strike", "option_type",
+                         name="uq_fo_chain"),
+        Index("ix_fo_chain_symbol_time", "symbol", "snapshot_time"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    symbol        = Column(String, nullable=False)          # "NIFTY", "BANKNIFTY"
+    snapshot_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    expiry        = Column(Date, nullable=False)
+    strike        = Column(Float, nullable=False)
+    option_type   = Column(String, nullable=False)          # "CE" or "PE"
+    oi            = Column(Float)                           # open interest (contracts)
+    change_oi     = Column(Float)                           # OI change from prev bar
+    volume        = Column(Float)
+    ltp           = Column(Float)                           # last traded price
+    iv            = Column(Float)                           # implied volatility %
+    max_pain      = Column(Float, nullable=True)            # max pain strike for this expiry
+
+
+class CorporateAction(Base):
+    """India (NSE/BSE) corporate actions: dividends, splits, bonuses, rights."""
+    __tablename__ = "corporate_actions"
+    __table_args__ = (
+        UniqueConstraint("ticker", "ex_date", "action_type", name="uq_corp_action"),
+        Index("ix_corp_action_ticker_date", "ticker", "ex_date"),
+    )
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    ticker      = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    ex_date     = Column(Date, nullable=False, index=True)
+    action_type = Column(String, nullable=False)            # "DIVIDEND", "SPLIT", "BONUS", "RIGHTS"
+    details     = Column(JSONB)                             # ratio, amount, record_date, etc.
+    source      = Column(String)                            # "NSE", "BSE", "YFINANCE"
+
+
+class MutualFundNav(Base):
+    """AMFI mutual fund NAV — daily NAV per scheme."""
+    __tablename__ = "mutual_fund_nav"
+    __table_args__ = (
+        UniqueConstraint("scheme_code", "date", name="uq_mf_nav_scheme_date"),
+        Index("ix_mf_nav_scheme_date", "scheme_code", "date"),
+    )
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    scheme_code = Column(String, nullable=False, index=True)
+    scheme_name = Column(String)
+    fund_house  = Column(String)
+    category    = Column(String)                            # "Equity", "Debt", "Hybrid"
+    date        = Column(Date, nullable=False, index=True)
+    nav         = Column(Float)
+
+
+class MutualFundHolding(Base):
+    """AMFI monthly portfolio disclosures — top holdings per scheme."""
+    __tablename__ = "mutual_fund_holdings"
+    __table_args__ = (
+        UniqueConstraint("scheme_code", "disclosure_date", "ticker", name="uq_mf_holding"),
+        Index("ix_mf_holding_ticker", "ticker"),
+    )
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    scheme_code     = Column(String, nullable=False, index=True)
+    disclosure_date = Column(Date, nullable=False, index=True)
+    ticker          = Column(String, index=True)            # NSE symbol (may not be in stocks table)
+    company_name    = Column(String)
+    isin            = Column(String)
+    market_value    = Column(Float)                         # in crores INR
+    pct_net_assets  = Column(Float)                         # % of scheme AUM
+    shares_held     = Column(BigInteger, nullable=True)

@@ -73,6 +73,27 @@ async def run_prices_gap_fill():
     await prices_nightly_gap_fill_flow()
 
 
+# ── Intraday 15m bar refresh ───────────────────────────────────────────────────
+
+async def run_intraday_india():
+    logger.info("[Scheduler] Intraday India 15m refresh...")
+    from app.flows.intraday_flow import intraday_india_flow
+    await intraday_india_flow()
+
+async def run_intraday_us():
+    logger.info("[Scheduler] Intraday US 15m refresh...")
+    from app.flows.intraday_flow import intraday_us_flow
+    await intraday_us_flow()
+
+
+# ── NSE F&O option chain snapshots ────────────────────────────────────────────
+
+async def run_fo_chain():
+    logger.info("[Scheduler] NSE F&O chain snapshot...")
+    from app.flows.fo_chain_flow import fo_chain_flow
+    await fo_chain_flow()
+
+
 # ── Ingestion flows ────────────────────────────────────────────────────────────
 
 async def run_daily():
@@ -186,6 +207,7 @@ async def lifespan(app: FastAPI):
             NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
             ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
             InsiderTransaction, AnalystRating, StockTechnicals, ShortInterest, Dividend,
+            IntradayPrice, FoChainSnapshot, CorporateAction, MutualFundNav, MutualFundHolding,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -212,6 +234,32 @@ async def lifespan(app: FastAPI):
     # ── Nightly gap fill: runs at midnight UTC every day ──────────────────────
     scheduler.add_job(run_prices_gap_fill, CronTrigger(hour=0, minute=0),
                       id="prices_gap_fill", replace_existing=True)
+
+    # ── Intraday 15m bars: India session (03:45–10:00 UTC) ────────────────────
+    for hour, minute in [(4, 0), (6, 0), (8, 0), (10, 15)]:
+        scheduler.add_job(
+            run_intraday_india,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            id=f"intraday_india_{hour:02d}{minute:02d}",
+            replace_existing=True,
+        )
+
+    # ── Intraday 15m bars: US session (14:30–21:00 UTC) ───────────────────────
+    for hour, minute in [(14, 45), (17, 0), (19, 0), (21, 15)]:
+        scheduler.add_job(
+            run_intraday_us,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            id=f"intraday_us_{hour:02d}{minute:02d}",
+            replace_existing=True,
+        )
+
+    # ── NSE F&O OI chain: every 15 min during NSE session (04:00–10:00 UTC) ──
+    scheduler.add_job(
+        run_fo_chain,
+        CronTrigger(minute="*/15", hour="4-10", day_of_week="mon-fri"),
+        id="fo_chain_snapshot",
+        replace_existing=True,
+    )
 
     # ── Daily ingestion pipeline ───────────────────────────────────────────────
     scheduler.add_job(run_daily, CronTrigger(hour=22, minute=0, day_of_week="mon-fri"),
@@ -248,6 +296,9 @@ async def lifespan(app: FastAPI):
         "  India EOD:        10:45 UTC weekdays\n"
         "  US EOD:           21:00 UTC weekdays\n"
         "  Nightly gap fill: 00:00 UTC daily\n"
+        "  Intraday 15m IN:  04:00, 06:00, 08:00, 10:15 UTC (weekdays)\n"
+        "  Intraday 15m US:  14:45, 17:00, 19:00, 21:15 UTC (weekdays)\n"
+        "  F&O OI chain:     every 15 min, 04:00-10:00 UTC (weekdays)\n"
         "  Daily ingest:     22:00 UTC weekdays\n"
         "  Agent scoring:    23:00 UTC weekdays\n"
         "  Swing screener:   00:30 UTC weekdays\n"

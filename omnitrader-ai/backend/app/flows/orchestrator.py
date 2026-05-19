@@ -91,6 +91,9 @@ from app.flows.computed_flow import (
 )
 from app.flows.analysts_flow import analysts_initial_flow, analysts_daily_flow, analysts_weekly_flow
 from app.flows.insiders_flow import insiders_initial_flow, insiders_daily_flow
+from app.flows.intraday_flow import intraday_initial_flow
+from app.flows.corporate_actions_flow import corporate_actions_initial_flow, corporate_actions_weekly_flow
+from app.flows.mutual_funds_flow import mutual_funds_initial_flow, mutual_funds_daily_flow
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +145,24 @@ async def full_initial_load_flow():
     logger.info("\n[8/8] ── COMPUTED ───────────────────────────────────────")
     await computed_initial_flow()
 
+    logger.info("\n[9/11] ── INTRADAY 15M BARS ────────────────────────────")
+    try:
+        await intraday_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Intraday bars failed: %s", e)
+
+    logger.info("\n[10/11] ── INDIA CORPORATE ACTIONS ─────────────────────")
+    try:
+        await corporate_actions_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Corporate actions failed: %s", e)
+
+    logger.info("\n[11/11] ── MUTUAL FUND NAV ──────────────────────────────")
+    try:
+        await mutual_funds_initial_flow()
+    except Exception as e:
+        logger.error("[Initial] Mutual fund NAV failed: %s", e)
+
     logger.info("\n" + "=" * 60)
     logger.info("  FULL INITIAL LOAD COMPLETE")
     logger.info("=" * 60)
@@ -179,6 +200,12 @@ async def daily_ingest_flow():
     except Exception as e:
         logger.error("[Daily] Insider/Analyst refresh failed: %s", e)
 
+    # Mutual fund NAV (daily — AMFI publishes after market close)
+    try:
+        await mutual_funds_daily_flow()
+    except Exception as e:
+        logger.error("[Daily] Mutual fund NAV failed: %s", e)
+
     logger.info("=== DAILY INGEST COMPLETE ===")
 
 
@@ -211,6 +238,14 @@ async def weekly_ingest_flow():
         logger.info("[Weekly] Analysts + short interest refreshed.")
     except Exception as e:
         logger.error("[Weekly] Analysts/short interest failed: %s", e)
+
+    # India corporate actions — splits, bonuses, rights
+    try:
+        await corporate_actions_weekly_flow()
+        logger.info("[Weekly] Corporate actions refreshed.")
+    except Exception as e:
+        logger.error("[Weekly] Corporate actions failed: %s", e)
+
     logger.info("=== WEEKLY INGEST COMPLETE ===")
 
 

@@ -44,7 +44,60 @@ _MIGRATIONS = [
     "ALTER TABLE stocks ADD COLUMN IF NOT EXISTS fo_ban_updated TIMESTAMPTZ",
     "ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS eps_estimate FLOAT",
     "ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS eps_surprise_pct FLOAT",
+    # Intraday 15-minute bars
+    "CREATE TABLE IF NOT EXISTS intraday_prices (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, time TIMESTAMPTZ NOT NULL, open FLOAT, high FLOAT, low FLOAT, close FLOAT, volume FLOAT, CONSTRAINT uq_intraday_ticker_time UNIQUE (ticker, time))",
+    "CREATE INDEX IF NOT EXISTS ix_intraday_ticker_time ON intraday_prices (ticker, time)",
+    # F&O option chain snapshots
+    "CREATE TABLE IF NOT EXISTS fo_chain_snapshots (id SERIAL PRIMARY KEY, symbol VARCHAR NOT NULL, snapshot_time TIMESTAMPTZ NOT NULL, expiry DATE NOT NULL, strike FLOAT NOT NULL, option_type VARCHAR NOT NULL, oi FLOAT, change_oi FLOAT, volume FLOAT, ltp FLOAT, iv FLOAT, max_pain FLOAT, CONSTRAINT uq_fo_chain UNIQUE (symbol, snapshot_time, expiry, strike, option_type))",
+    "CREATE INDEX IF NOT EXISTS ix_fo_chain_symbol_time ON fo_chain_snapshots (symbol, snapshot_time)",
+    # India corporate actions
+    "CREATE TABLE IF NOT EXISTS corporate_actions (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, ex_date DATE NOT NULL, action_type VARCHAR NOT NULL, details JSONB, source VARCHAR, CONSTRAINT uq_corp_action UNIQUE (ticker, ex_date, action_type))",
+    "CREATE INDEX IF NOT EXISTS ix_corp_action_ticker_date ON corporate_actions (ticker, ex_date)",
+    # Mutual fund NAV
+    "CREATE TABLE IF NOT EXISTS mutual_fund_nav (id SERIAL PRIMARY KEY, scheme_code VARCHAR NOT NULL, scheme_name VARCHAR, fund_house VARCHAR, category VARCHAR, date DATE NOT NULL, nav FLOAT, CONSTRAINT uq_mf_nav_scheme_date UNIQUE (scheme_code, date))",
+    "CREATE INDEX IF NOT EXISTS ix_mf_nav_scheme_date ON mutual_fund_nav (scheme_code, date)",
+    # Mutual fund holdings
+    "CREATE TABLE IF NOT EXISTS mutual_fund_holdings (id SERIAL PRIMARY KEY, scheme_code VARCHAR NOT NULL, disclosure_date DATE NOT NULL, ticker VARCHAR, company_name VARCHAR, isin VARCHAR, market_value FLOAT, pct_net_assets FLOAT, shares_held BIGINT, CONSTRAINT uq_mf_holding UNIQUE (scheme_code, disclosure_date, ticker))",
+    "CREATE INDEX IF NOT EXISTS ix_mf_holding_ticker ON mutual_fund_holdings (ticker)",
 ]
+
+
+_TIMESCALE_HYPERTABLES = [
+    # (table_name, time_column, chunk_interval)
+    ("stock_prices",     "time",          "7 days"),
+    ("intraday_prices",  "time",          "1 day"),
+    ("news_sentiment",   "time",          "7 days"),
+    ("macro_data",       "time",          "30 days"),
+    ("fo_chain_snapshots", "snapshot_time", "1 day"),
+]
+
+
+async def setup_timescaledb():
+    """
+    Activate TimescaleDB extension and convert key time-series tables to hypertables.
+    Safe to call repeatedly — uses IF NOT EXISTS guards.
+    """
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(__import__('sqlalchemy').text(
+                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE"
+            ))
+        except Exception as e:
+            print(f"  [TimescaleDB] Extension setup: {e}")
+            return  # TimescaleDB not installed — skip hypertable creation
+
+        for table, col, interval in _TIMESCALE_HYPERTABLES:
+            try:
+                await conn.execute(__import__('sqlalchemy').text(f"""
+                    SELECT create_hypertable('{table}', '{col}',
+                        chunk_time_interval => INTERVAL '{interval}',
+                        if_not_exists => TRUE,
+                        migrate_data => TRUE)
+                """))
+                print(f"  [TimescaleDB] Hypertable: {table} ({col}, {interval})")
+            except Exception as e:
+                print(f"  [TimescaleDB] {table}: {e}")
+    print("TimescaleDB setup complete.")
 
 
 async def run_migrations():
@@ -65,6 +118,7 @@ async def init_models(drop_first: bool = False):
             await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     await run_migrations()
+    await setup_timescaledb()
     print("Database tables created/verified.")
 
 
