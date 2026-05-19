@@ -42,6 +42,11 @@ export const agentsApi = {
     getSystemStatus: () => api.get('/agents/system-status'),
 };
 
+export const backtestApi = {
+    run: (params) => api.post('/backtest/run', params),
+    quickStats: (country = null) => api.get('/backtest/quick-stats', { params: country ? { country } : {} }),
+};
+
 export const watchlistApi = {
     getWatchlist: () => api.get('/watchlist'),
     addTicker: (ticker, priority = 'MEDIUM', notes = null) =>

@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.api import ingestion, agents
 from app.api import signals as signals_router
 from app.api import watchlist as watchlist_router
+from app.api import backtest as backtest_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -227,6 +228,7 @@ app.include_router(ingestion.router)
 app.include_router(agents.router,              prefix="/api/v1/agents",    tags=["agents"])
 app.include_router(signals_router.router,      prefix="/api/v1/agents",    tags=["signals"])
 app.include_router(watchlist_router.router,    prefix="/api/v1/watchlist", tags=["watchlist"])
+app.include_router(backtest_router.router,     prefix="/api/v1/backtest",  tags=["backtest"])
 
 import os
 from fastapi.staticfiles import StaticFiles

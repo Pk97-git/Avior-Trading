@@ -147,6 +147,14 @@ async def _create_alert(
     )
     db.add(alert)
 
+    # Fire notifications (non-blocking — errors are caught and logged)
+    try:
+        from app.services.notifications import NotificationService
+        notif = NotificationService()
+        await notif.send_alert(ticker, signal, previous_signal, final_score, signal_thesis[:3])
+    except Exception as e:
+        logger.warning("Notification failed for %s: %s", ticker, e)
+
 
 async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     """

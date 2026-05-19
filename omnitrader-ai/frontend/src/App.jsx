@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award, Star, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award, Star, BarChart2, TrendingUp, FlaskConical } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
 import Dashboard from './components/Dashboard';
@@ -10,12 +10,16 @@ import LiveJobsView from './components/LiveJobsView';
 import Watchlist from './components/Watchlist';
 import SignalPerformance from './components/SignalPerformance';
 import SettingsPage from './components/Settings';
+import SwingSetups from './components/SwingSetups';
+import Backtest from './components/Backtest';
 
 const TABS = [
     { id: 'dashboard',   label: 'Executive Dashboard', icon: LayoutDashboard },
     { id: 'hub',         label: 'Intelligence Hub',    icon: Zap },
+    { id: 'swing',       label: 'Swing Setups',        icon: TrendingUp },
     { id: 'watchlist',   label: 'Watchlist',           icon: Star },
     { id: 'performance', label: 'Signal Performance',  icon: BarChart2 },
+    { id: 'backtest',    label: 'Backtest',             icon: FlaskConical },
     { id: 'market',      label: 'Market Analysis',     icon: Activity },
     { id: 'compounders', label: 'Compounders',         icon: Award },
     { id: 'data',        label: 'Data Ingestion',      icon: Database },
@@ -99,11 +103,17 @@ export default function App() {
                             initialTicker={hubTicker}
                         />
                     )}
+                    {activeTab === 'swing' && (
+                        <SwingSetups onNavigate={handleNavigate} />
+                    )}
                     {activeTab === 'watchlist' && (
                         <Watchlist onNavigate={handleNavigate} />
                     )}
                     {activeTab === 'performance' && (
                         <SignalPerformance />
+                    )}
+                    {activeTab === 'backtest' && (
+                        <Backtest />
                     )}
                     {activeTab === 'market' && (
                         <MarketAnalysis />
