@@ -102,6 +102,16 @@ async def run_swing():
     logger.info("[Scheduler] swing_trading_flow complete.")
 
 
+async def run_health_check():
+    logger.info("[Scheduler] Running data freshness health check...")
+    from app.services.health_monitor import HealthMonitor
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        monitor = HealthMonitor(db)
+        result = await monitor.run_checks()
+        logger.info("[Scheduler] Health check: %s — %s", result["status"], result.get("warnings", []))
+
+
 async def walk_forward_run():
     logger.info("[Scheduler] Starting WalkForwardValidator...")
     from app.agents.validator import WalkForwardValidator
@@ -195,6 +205,10 @@ async def lifespan(app: FastAPI):
     # ── Monthly: 13F + promoter holdings ──────────────────────────────────────
     scheduler.add_job(run_monthly, CronTrigger(day=1, hour=3, minute=0),
                       id="monthly_ingest", replace_existing=True)
+
+    # ── Operational health check: 06:00 UTC daily ──────────────────────────────
+    scheduler.add_job(run_health_check, CronTrigger(hour=6, minute=0),
+                      id="health_check", replace_existing=True)
 
     scheduler.start()
     logger.info(
