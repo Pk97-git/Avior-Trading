@@ -79,4 +79,35 @@ export const ordersApi = {
     syncBroker: () => api.post('/orders/broker/sync'),
 };
 
+export const earningsApi = {
+    getCalendar:  (params = {}) => api.get('/earnings/calendar', { params }),
+    getTicker:    (ticker) => api.get(`/earnings/calendar/${ticker.toUpperCase()}`),
+    getBestSetups: (params = {}) => api.get('/earnings/calendar/setups/best', { params }),
+};
+
+export const optionsApi = {
+    getUnusual:   (params = {}) => api.get('/options/unusual', { params }),
+    getPutCall:   (ticker) => api.get(`/options/put-call/${ticker.toUpperCase()}`),
+    getChain:     (ticker, expiry = null) => api.get(`/options/chain/${ticker.toUpperCase()}`, { params: expiry ? { expiry } : {} }),
+};
+
+export const sectorsApi = {
+    getRotation: () => api.get('/sectors/rotation'),
+    getHistory:  (etf, days = 90) => api.get('/sectors/rotation/history', { params: { sector_etf: etf, days } }),
+};
+
+export const riskApi = {
+    getPortfolioRisk:    () => api.get('/risk/portfolio-risk'),
+    getCorrelation:      () => api.get('/risk/correlation-matrix'),
+    getRsRankings:       (params = {}) => api.get('/risk/rs-rankings', { params }),
+    getTickerRs:         (ticker) => api.get(`/risk/rs-rankings/${ticker.toUpperCase()}`),
+};
+
+export const trailingStopsApi = {
+    run:         () => api.post('/trailing-stops/run'),
+    runSingle:   (positionId) => api.post(`/trailing-stops/${positionId}`),
+    getConfig:   () => api.get('/trailing-stops/config'),
+    setConfig:   (body) => api.put('/trailing-stops/config', body),
+};
+
 export default api;

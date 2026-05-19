@@ -14,6 +14,7 @@ Startup lifecycle:
  10. Schedule weekly_ingest_flow()          every Sunday at 02:00 UTC
  11. Schedule walk_forward_run()            every Sunday at 03:00 UTC (signal quality validation)
  12. Schedule monthly_ingest_flow()         at 03:00 UTC on 1st of every month (13F, promoter)
+ 13. Schedule run_trailing_stops()          every hour on weekdays (ratchet stop-losses)
 """
 import asyncio
 import logging
@@ -32,6 +33,11 @@ from app.api import portfolio as portfolio_router
 from app.api import circuit_breaker as circuit_breaker_router
 from app.api import prices_sse as prices_sse_router
 from app.api import orders as orders_router
+from app.api import trailing_stops as trailing_stops_router
+from app.api import sectors as sectors_router
+from app.api import risk as risk_router
+from app.api import earnings as earnings_router
+from app.api import options as options_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -123,6 +129,21 @@ async def walk_forward_run():
         logger.info("[Scheduler] WalkForwardValidator result: %s", result)
 
 
+async def run_trailing_stops():
+    logger.info("[Scheduler] Running trailing stop updates...")
+    from app.services.trailing_stops import TrailingStopService
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        svc = TrailingStopService(db)
+        result = await svc.run()
+        exits = result.get("needs_exit", [])
+        if exits:
+            logger.warning("[Scheduler] %d positions breached stop loss: %s",
+                          len(exits), [e["ticker"] for e in exits])
+        logger.info("[Scheduler] Trailing stops: %d updated, %d need exit.",
+                   len(result.get("updated", [])), len(exits))
+
+
 async def check_and_run_initial_load():
     """
     On boot: if stock_prices has fewer than 100 rows, trigger the full
@@ -211,6 +232,10 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_health_check, CronTrigger(hour=6, minute=0),
                       id="health_check", replace_existing=True)
 
+    # ── Trailing stops: every hour on weekdays ─────────────────────────────────
+    scheduler.add_job(run_trailing_stops, CronTrigger(minute=0, day_of_week="mon-fri"),
+                      id="trailing_stops", replace_existing=True)
+
     scheduler.start()
     logger.info(
         "[Scheduler] Jobs registered:\n"
@@ -223,7 +248,8 @@ async def lifespan(app: FastAPI):
         "  Swing screener:   00:30 UTC weekdays\n"
         "  Weekly refresh:   Sun 02:00 UTC\n"
         "  Walk-forward:     Sun 03:00 UTC\n"
-        "  Monthly 13F:      1st of month 03:00 UTC"
+        "  Monthly 13F:      1st of month 03:00 UTC\n"
+        "  Trailing stops:   hourly weekdays"
     )
 
     asyncio.create_task(check_and_run_initial_load())
@@ -251,6 +277,11 @@ app.include_router(portfolio_router.router,        prefix="/api/v1/portfolio",  
 app.include_router(circuit_breaker_router.router,  prefix="/api/v1/circuit-breaker",  tags=["circuit-breaker"])
 app.include_router(prices_sse_router.router,       prefix="/api/v1/prices",           tags=["prices"])
 app.include_router(orders_router.router,           prefix="/api/v1/orders",           tags=["orders"])
+app.include_router(trailing_stops_router.router,   prefix="/api/v1/trailing-stops",   tags=["trailing-stops"])
+app.include_router(sectors_router.router,          prefix="/api/v1/sectors",           tags=["sectors"])
+app.include_router(risk_router.router,             prefix="/api/v1/risk",              tags=["risk"])
+app.include_router(earnings_router.router,         prefix="/api/v1/earnings",          tags=["earnings"])
+app.include_router(options_router.router,          prefix="/api/v1/options",           tags=["options"])
 
 import os
 from fastapi.staticfiles import StaticFiles
