@@ -68,21 +68,50 @@ async def task_fundamentals() -> dict:
     return {"tickers": len(tickers), "duration_s": round(time.monotonic() - _t, 1)}
 
 
+@task(name="Fundamentals — Dividends", retries=1)
+async def task_dividends() -> dict:
+    """
+    Fetches dividend history and forward yield for all MEDIUM-tier equities.
+    Skips crypto, futures, and indices (no dividends).
+    """
+    from app.ingestion.core.dividends import DividendService
+    tickers = _equity_universe()
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = DividendService(session)
+        result = await svc.run_batch(tickers)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
+@task(name="Fundamentals — Earnings Surprise", retries=1)
+async def task_earnings_surprise() -> dict:
+    """
+    Fetches analyst consensus EPS estimates and computes surprise % for
+    MEDIUM-tier equities. Updates eps_estimate and eps_surprise_pct in
+    company_financials.
+    """
+    from app.ingestion.core.earnings_surprise import EarningsSurpriseService
+    tickers = _equity_universe()
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = EarningsSurpriseService(session)
+        result = await svc.run_batch(tickers)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
 # ══════════════════════════════════════════════════════════════
 # HISTORICAL — run once on fresh install
 # ══════════════════════════════════════════════════════════════
 
 @flow(name="Fundamentals — Initial Load", log_prints=True)
 async def fundamentals_initial_flow():
-    """
-    Fetches financial statements for all MEDIUM-tier equities.
-    The completeness monitor identifies every ticker with no data or
-    stale data (>180 days) and fetches from yfinance.
-    Safe to re-run: all writes are upserts.
-    """
     logger.info("=== [Fundamentals] Initial Load ===")
-    result = await task_fundamentals()
-    logger.info("Fundamentals: %s", result)
+    r1 = await task_fundamentals()
+    logger.info("Fundamentals: %s", r1)
+    r2 = await task_dividends()
+    logger.info("Dividends: %s", r2)
+    r3 = await task_earnings_surprise()
+    logger.info("Earnings surprise: %s", r3)
     logger.info("=== [Fundamentals] Initial Load Complete ===")
 
 
@@ -92,12 +121,11 @@ async def fundamentals_initial_flow():
 
 @flow(name="Fundamentals — Weekly Refresh", log_prints=True)
 async def fundamentals_weekly_flow():
-    """
-    Checks the entire MEDIUM equity universe for new quarterly filings.
-    Tickers with fiscal_date older than 180 days are re-fetched.
-    Runs every Sunday — catches new earnings within 7 days of release.
-    """
     logger.info("=== [Fundamentals] Weekly Refresh ===")
-    result = await task_fundamentals()
-    logger.info("Fundamentals: %s", result)
+    r1 = await task_fundamentals()
+    logger.info("Fundamentals: %s", r1)
+    r2 = await task_dividends()
+    logger.info("Dividends: %s", r2)
+    r3 = await task_earnings_surprise()
+    logger.info("Earnings surprise: %s", r3)
     logger.info("=== [Fundamentals] Weekly Refresh Complete ===")

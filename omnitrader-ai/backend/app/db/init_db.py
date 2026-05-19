@@ -32,6 +32,18 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS stock_technicals (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, sma_20 FLOAT, sma_50 FLOAT, sma_200 FLOAT, ema_9 FLOAT, ema_21 FLOAT, rsi_14 FLOAT, macd FLOAT, macd_signal FLOAT, macd_hist FLOAT, atr_14 FLOAT, bb_upper FLOAT, bb_lower FLOAT, bb_mid FLOAT, vol_ratio FLOAT, week_52_high FLOAT, week_52_low FLOAT, rs_vs_spx FLOAT, rs_vs_nsei FLOAT, CONSTRAINT uq_stock_technicals_ticker_date UNIQUE (ticker, date))",
     "CREATE INDEX IF NOT EXISTS idx_stock_technicals_ticker ON stock_technicals (ticker)",
     "CREATE INDEX IF NOT EXISTS idx_stock_technicals_date ON stock_technicals (date)",
+    # Short interest
+    "CREATE TABLE IF NOT EXISTS short_interest (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, short_ratio FLOAT, short_pct_float FLOAT, shares_short BIGINT, CONSTRAINT uq_short_interest_ticker_date UNIQUE (ticker, date))",
+    "CREATE INDEX IF NOT EXISTS idx_short_interest_ticker ON short_interest (ticker)",
+    # Dividends
+    "CREATE TABLE IF NOT EXISTS dividends (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, ex_date DATE NOT NULL, amount FLOAT, yield_fwd FLOAT, div_cagr_5y FLOAT, CONSTRAINT uq_dividend_ticker_exdate UNIQUE (ticker, ex_date))",
+    "CREATE INDEX IF NOT EXISTS idx_dividends_ticker ON dividends (ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_dividends_ex_date ON dividends (ex_date)",
+    # F&O ban + earnings surprise columns
+    "ALTER TABLE stocks ADD COLUMN IF NOT EXISTS is_fo_banned BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE stocks ADD COLUMN IF NOT EXISTS fo_ban_updated TIMESTAMPTZ",
+    "ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS eps_estimate FLOAT",
+    "ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS eps_surprise_pct FLOAT",
 ]
 
 

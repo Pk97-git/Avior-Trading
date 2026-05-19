@@ -89,7 +89,7 @@ from app.flows.computed_flow import (
     computed_daily_flow,
     computed_weekly_flow,
 )
-from app.flows.analysts_flow import analysts_initial_flow, analysts_daily_flow
+from app.flows.analysts_flow import analysts_initial_flow, analysts_daily_flow, analysts_weekly_flow
 from app.flows.insiders_flow import insiders_initial_flow, insiders_daily_flow
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,12 @@ async def weekly_ingest_flow():
     await macro_weekly_flow()
     await institutional_weekly_flow()
     await computed_weekly_flow()
+    # Analyst ratings + short interest weekly refresh
+    try:
+        await analysts_weekly_flow()
+        logger.info("[Weekly] Analysts + short interest refreshed.")
+    except Exception as e:
+        logger.error("[Weekly] Analysts/short interest failed: %s", e)
     logger.info("=== WEEKLY INGEST COMPLETE ===")
 
 

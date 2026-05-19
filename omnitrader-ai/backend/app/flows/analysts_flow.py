@@ -14,6 +14,7 @@ Coverage  : HIGH-tier equities (US + India)
       Fetches the last 90 days of analyst ratings for ALL HIGH-tier
       equities (both US and India). yfinance only exposes 90 days,
       so this is the maximum historical depth available.
+      Also fetches short interest for US equities.
 
 ──────────────────────────────────────────────────────────────
  INCREMENTAL (scheduled — every weekday via daily_ingest_flow)
@@ -22,6 +23,14 @@ Coverage  : HIGH-tier equities (US + India)
       Refreshes the last 90 days for the top 50 HIGH-tier equities.
       Called inside daily_ingest_flow() in orchestrator.py.
       Catches upgrades and downgrades within 24 hours of publication.
+
+──────────────────────────────────────────────────────────────
+ INCREMENTAL (scheduled — every Sunday via weekly_ingest_flow)
+──────────────────────────────────────────────────────────────
+  analysts_weekly_flow()
+      Refreshes analyst ratings + short interest for all HIGH-tier
+      equities. Short interest changes bi-monthly; weekly fetch
+      ensures currency.
 ──────────────────────────────────────────────────────────────
 """
 import logging
@@ -55,17 +64,26 @@ async def task_analysts(tickers: list) -> dict:
     return {**result, "duration_s": round(time.monotonic() - _t, 1)}
 
 
+@task(name="Short Interest — Batch Fetch", retries=1)
+async def task_short_interest(tickers: list) -> dict:
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as db:
+        from app.ingestion.core.short_interest import ShortInterestService
+        svc = ShortInterestService(db)
+        result = await svc.run_batch(tickers)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
 @flow(name="Analysts — Initial Load", log_prints=True)
 async def analysts_initial_flow():
-    """
-    Fetches last 90 days of analyst ratings for all HIGH-tier equities.
-    This is the maximum history yfinance exposes.
-    Safe to re-run: all writes are upserts.
-    """
     logger.info("=== [Analysts] Initial Load ===")
     tickers = _high_equity_tickers()
-    result = await task_analysts(tickers)
-    logger.info("Analysts: %s", result)
+    # Only US equities for short interest (yfinance coverage is US-centric)
+    us_tickers = [t for t in tickers if not (t.endswith(".NS") or t.endswith(".BO"))]
+    r1 = await task_analysts(tickers)
+    logger.info("Analysts: %s", r1)
+    r2 = await task_short_interest(us_tickers)
+    logger.info("Short interest: %s", r2)
     logger.info("=== [Analysts] Initial Load Complete ===")
 
 
@@ -80,3 +98,20 @@ async def analysts_daily_flow():
     result = await task_analysts(tickers)
     logger.info("Analysts: %s", result)
     logger.info("=== [Analysts] Daily Refresh Complete ===")
+
+
+@flow(name="Analysts — Weekly Refresh", log_prints=True)
+async def analysts_weekly_flow():
+    """
+    Refreshes analyst ratings + short interest for all HIGH-tier equities.
+    Runs weekly (Sunday) as part of weekly_ingest_flow.
+    Short interest changes bi-monthly; weekly fetch ensures currency.
+    """
+    logger.info("=== [Analysts] Weekly Refresh ===")
+    tickers = _high_equity_tickers()
+    us_tickers = [t for t in tickers if not (t.endswith(".NS") or t.endswith(".BO"))]
+    r1 = await task_analysts(tickers)
+    logger.info("Analysts: %s", r1)
+    r2 = await task_short_interest(us_tickers)
+    logger.info("Short interest: %s", r2)
+    logger.info("=== [Analysts] Weekly Refresh Complete ===")

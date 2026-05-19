@@ -1,7 +1,7 @@
 import logging
 import math
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.models.market_data import CompanyFinancials
 
 logger = logging.getLogger("omnitrader.agent.fundamental")
@@ -194,6 +194,61 @@ class FundamentalAgent:
             else:
                 score -= 10
                 thesis.append(f"High leverage D/E {de:.2f} — elevated financial risk.")
+
+        # ── Dividend Yield & Growth ───────────────────────────────────────────
+        try:
+            div_res = await self.db.execute(text("""
+                SELECT yield_fwd, div_cagr_5y
+                FROM dividends
+                WHERE ticker = :t
+                ORDER BY ex_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            div_row = div_res.fetchone()
+            if div_row:
+                if div_row.yield_fwd and div_row.yield_fwd > 0:
+                    y = div_row.yield_fwd
+                    if y > 5:
+                        score += 6
+                        thesis.append(f"High dividend yield {y:.1f}% — strong income stream.")
+                    elif y > 2:
+                        score += 3
+                        thesis.append(f"Dividend yield {y:.1f}% — returns cash to shareholders.")
+                if div_row.div_cagr_5y and div_row.div_cagr_5y > 0:
+                    cagr = div_row.div_cagr_5y
+                    if cagr > 10:
+                        score += 5
+                        thesis.append(f"Dividend CAGR {cagr:.1f}% over 5 years — dividend growth compounder.")
+                    elif cagr > 5:
+                        score += 2
+                        thesis.append(f"Dividend growing at {cagr:.1f}% annually.")
+        except Exception:
+            pass
+
+        # ── Earnings Surprise ─────────────────────────────────────────────────
+        try:
+            surp_res = await self.db.execute(text("""
+                SELECT eps_surprise_pct, fiscal_date
+                FROM company_financials
+                WHERE ticker = :t AND eps_surprise_pct IS NOT NULL
+                ORDER BY fiscal_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            surp_row = surp_res.fetchone()
+            if surp_row:
+                s = surp_row.eps_surprise_pct
+                if s > 10:
+                    score += 8
+                    thesis.append(f"Earnings beat consensus by +{s:.1f}% — positive surprise momentum (PEAD).")
+                elif s > 3:
+                    score += 4
+                    thesis.append(f"Earnings beat consensus by +{s:.1f}%.")
+                elif s < -10:
+                    score -= 8
+                    thesis.append(f"Earnings missed consensus by {s:.1f}% — negative surprise risk.")
+                elif s < -3:
+                    score -= 4
+                    thesis.append(f"Earnings slightly missed consensus ({s:.1f}%).")
+        except Exception:
+            pass
 
         score = max(0, min(100, score))
         logger.info("FundamentalAgent %s: score=%d", self.ticker, score)

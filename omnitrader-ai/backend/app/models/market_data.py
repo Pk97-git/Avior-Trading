@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey, Boolean, Index, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Date, ForeignKey, Boolean, Index, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -16,6 +16,8 @@ class Stock(Base):
     industry = Column(String)
     country = Column(String)          # "US" / "IN"
     meta_data = Column(JSONB)
+    is_fo_banned   = Column(Boolean, default=False, nullable=False, server_default="false")
+    fo_ban_updated = Column(DateTime(timezone=True), nullable=True)
 
     prices = relationship("StockPrice", back_populates="stock")
 
@@ -60,6 +62,8 @@ class CompanyFinancials(Base):
     revenue = Column(Float)
     net_income = Column(Float)
     eps = Column(Float)
+    eps_estimate    = Column(Float, nullable=True)   # analyst consensus EPS estimate
+    eps_surprise_pct = Column(Float, nullable=True)  # (actual - estimate) / |estimate| * 100
     total_assets = Column(Float)
     total_liabilities = Column(Float)
     free_cash_flow = Column(Float)
@@ -395,3 +399,29 @@ class StockTechnicals(Base):
     # Relative Strength vs benchmark
     rs_vs_spx  = Column(Float)   # 3-month % return / SPX 3-month % return
     rs_vs_nsei = Column(Float)   # 3-month % return / Nifty 3-month % return (India stocks only)
+
+
+class ShortInterest(Base):
+    __tablename__ = "short_interest"
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_short_interest_ticker_date"),
+    )
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    ticker          = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    date            = Column(Date, nullable=False, index=True)
+    short_ratio     = Column(Float)       # days to cover
+    short_pct_float = Column(Float)       # % of float sold short (0.0–1.0)
+    shares_short    = Column(BigInteger, nullable=True)
+
+
+class Dividend(Base):
+    __tablename__ = "dividends"
+    __table_args__ = (
+        UniqueConstraint("ticker", "ex_date", name="uq_dividend_ticker_exdate"),
+    )
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    ticker      = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    ex_date     = Column(Date, nullable=False, index=True)
+    amount      = Column(Float)
+    yield_fwd   = Column(Float)       # forward annual yield %
+    div_cagr_5y = Column(Float)       # 5-year dividend growth CAGR %

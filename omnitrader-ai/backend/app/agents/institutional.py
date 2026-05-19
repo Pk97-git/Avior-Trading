@@ -78,6 +78,30 @@ class InstitutionalAgent:
         row = result.fetchone()
         return row.vol_ratio if row else None
 
+    async def _short_interest(self) -> dict | None:
+        """Latest short interest from short_interest table (US equities)."""
+        result = await self.db.execute(text("""
+            SELECT short_ratio, short_pct_float, date
+            FROM short_interest
+            WHERE ticker = :ticker
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        row = result.fetchone()
+        if not row:
+            return None
+        return {
+            "short_ratio":     row.short_ratio,
+            "short_pct_float": row.short_pct_float,
+        }
+
+    async def _fo_ban_check(self) -> bool:
+        """Returns True if this India stock is currently in F&O ban period."""
+        result = await self.db.execute(text("""
+            SELECT is_fo_banned FROM stocks WHERE ticker = :t
+        """), {"t": self.ticker})
+        row = result.fetchone()
+        return bool(row and row.is_fo_banned)
+
     async def _insider_signal(self) -> Optional[dict]:
         """
         Recent insider transactions from Form 4 filings (last 90 days).
@@ -161,6 +185,14 @@ class InstitutionalAgent:
                 logger.warning("Promoter delta fetch for %s: %s", self.ticker, e)
                 thesis.append("Promoter holding data unavailable.")
 
+            # ── F&O Ban ───────────────────────────────────────────────────────
+            try:
+                if await self._fo_ban_check():
+                    score -= 8
+                    thesis.append("Stock in F&O ban period — new derivative positions restricted; liquidity impacted.")
+            except Exception as e:
+                logger.warning("F&O ban check for %s: %s", self.ticker, e)
+
         else:
             # ── US: volume anomaly ────────────────────────────────────────────
             try:
@@ -182,6 +214,26 @@ class InstitutionalAgent:
             except Exception as e:
                 logger.warning("Volume anomaly fetch for %s: %s", self.ticker, e)
                 thesis.append("Volume data unavailable.")
+
+            # ── Short Interest ────────────────────────────────────────────────
+            try:
+                si = await self._short_interest()
+                if si:
+                    pct = si.get("short_pct_float") or 0
+                    days = si.get("short_ratio") or 0
+                    if pct > 0.20:
+                        score -= 12
+                        thesis.append(f"High short interest: {pct*100:.1f}% of float — heavy bearish bet or squeeze risk.")
+                    elif pct > 0.10:
+                        score -= 5
+                        thesis.append(f"Elevated short interest: {pct*100:.1f}% of float — notable bearish positioning.")
+                    elif pct < 0.02 and pct > 0:
+                        score += 5
+                        thesis.append(f"Very low short interest: {pct*100:.1f}% — market not betting against this stock.")
+                    if days > 10:
+                        thesis.append(f"Short squeeze risk: {days:.1f} days to cover.")
+            except Exception as e:
+                logger.warning("Short interest fetch for %s: %s", self.ticker, e)
 
         # ── Insider transactions (both markets) ────────────────────────────────
         try:

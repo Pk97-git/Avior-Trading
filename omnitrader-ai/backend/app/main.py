@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
             Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
             NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
             ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
-            InsiderTransaction, AnalystRating, StockTechnicals,
+            InsiderTransaction, AnalystRating, StockTechnicals, ShortInterest, Dividend,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

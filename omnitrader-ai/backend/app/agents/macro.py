@@ -21,6 +21,7 @@ Adjustments (applied on top of base):
 """
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.engines.regime import (
     MacroRegimeClassifier,
@@ -112,6 +113,32 @@ class MacroAgent:
             if inr is not None and inr > 85:
                 score -= 5
                 thesis.append(f"INR/USD at {inr:.1f} — weak rupee pressures India equities.")
+
+        # India ticker: India VIX adjustment
+        if is_india:
+            try:
+                india_vix_res = await self.db.execute(text("""
+                    SELECT value FROM macro_data
+                    WHERE indicator = 'INDIAVIX'
+                      AND value IS NOT NULL
+                    ORDER BY time DESC LIMIT 1
+                """))
+                india_vix_row = india_vix_res.fetchone()
+                if india_vix_row and india_vix_row.value:
+                    iv = float(india_vix_row.value)
+                    if iv > 30:
+                        score -= 10
+                        thesis.append(f"India VIX at {iv:.1f} — high domestic volatility; avoid aggressive entries.")
+                    elif iv > 22:
+                        score -= 4
+                        thesis.append(f"India VIX at {iv:.1f} — elevated; India-specific caution warranted.")
+                    elif iv <= 14:
+                        score += 5
+                        thesis.append(f"India VIX at {iv:.1f} — very calm; ideal conditions for India equities.")
+                    else:
+                        thesis.append(f"India VIX at {iv:.1f} — normal range.")
+            except Exception:
+                pass
 
         score = max(0, min(100, score))
         logger.info("MacroAgent %s: score=%d regime=%s", self.ticker, score, regime)

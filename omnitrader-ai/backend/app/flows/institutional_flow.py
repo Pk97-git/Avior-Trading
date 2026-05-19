@@ -180,6 +180,21 @@ async def task_promoter_holdings() -> dict:
     }
 
 
+@task(name="Institutional — NSE F&O Ban List", retries=2)
+async def task_fo_ban() -> dict:
+    """
+    Fetches the NSE F&O ban list and updates is_fo_banned on all India stocks.
+    Stocks in ban: OI > 95% of Market Wide Position Limit.
+    Runs daily — ban list changes every trading day.
+    """
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        from app.ingestion.institutional.fo_ban import FoBanService
+        svc = FoBanService(session)
+        result = await svc.update_ban_flags()
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
 # ══════════════════════════════════════════════════════════════
 # HISTORICAL — run once on fresh install
 # ══════════════════════════════════════════════════════════════
@@ -203,6 +218,8 @@ async def institutional_initial_flow():
     logger.info("SEC 13F: %s", r5)
     r6 = await task_promoter_holdings()
     logger.info("Promoter holdings: %s", r6)
+    r7 = await task_fo_ban()
+    logger.info("F&O ban: %s", r7)
     logger.info("=== [Institutional] Initial Load Complete ===")
 
 
@@ -219,6 +236,8 @@ async def institutional_daily_flow():
     logger.info("=== [Institutional] Daily FII/DII Update ===")
     result = await task_fii_dii()
     logger.info("FII/DII: %s", result)
+    r2 = await task_fo_ban()
+    logger.info("F&O ban: %s", r2)
     logger.info("=== [Institutional] Daily FII/DII Update Complete ===")
 
 
