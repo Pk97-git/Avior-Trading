@@ -174,6 +174,7 @@ RSS_FEEDS = {
 class SentimentService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._scorer = LLMSentimentScorer()  # uses LLM if API key set, else rule-based
 
     async def _upsert_sentiment(self, records: List[Dict]):
         if not records:
@@ -234,7 +235,7 @@ class SentimentService:
                         continue
 
                     pub_dt = datetime(*published[:6]) if published else datetime.utcnow()
-                    score = self._simple_sentiment_score(title)
+                    score, confidence = self._scorer.score(title)
                     tickers = self._extract_tickers_from_text(title, known_tickers)
 
                     for ticker in tickers[:1]:  # One record per headline
@@ -245,7 +246,7 @@ class SentimentService:
                             "source": source_name,
                             "url": link[:500],
                             "sentiment_score": score,
-                            "confidence": 0.5,  # Rule-based = medium confidence
+                            "confidence": confidence,
                         })
 
             except Exception as e:
@@ -283,7 +284,7 @@ class SentimentService:
                         continue
 
                     pub_dt = datetime.utcfromtimestamp(created)
-                    sentiment = self._simple_sentiment_score(title)
+                    sentiment, _conf = self._scorer.score(title)
 
                     # Map to the US or India index so it satisfies the TimescaleDB FK Constraint 
                     # instead of the illegal text 'MARKET'

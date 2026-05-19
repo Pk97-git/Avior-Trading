@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Index, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -161,7 +161,7 @@ class ChartSnapshot(Base):
 
 
 class AIAnalysis(Base):
-    """Full 5-agent scoring engine results + executive decision per ticker per day."""
+    """Full agent scoring engine results + executive decision per ticker per day."""
     __tablename__ = "ai_analysis"
 
     ticker = Column(String, ForeignKey("stocks.ticker"), primary_key=True)
@@ -187,9 +187,27 @@ class AIAnalysis(Base):
     institutional_thesis = Column(JSONB)
     sentiment_thesis     = Column(JSONB)
     memory_thesis        = Column(JSONB)
-    vision_score         = Column(Integer)  # 0–100 from VisionAgent (chart pattern analysis)
-    vision_thesis        = Column(JSONB)    # list[str] — chart pattern observations
+    vision_score         = Column(Integer)  # 0–100 from VisionAgent
+    vision_thesis        = Column(JSONB)    # list[str]
     signal_thesis        = Column(JSONB)    # executive summary bullets
+
+    # ── Phase 2: Strategist outputs ───────────────────────────────────────────
+    factor_scores           = Column(JSONB)   # {value, growth, momentum, quality, low_vol} z-scores
+    cross_asset_sensitivity = Column(JSONB)   # {US10Y, VIX, DXY, Oil, Gold} betas
+
+    # ── Phase 3: Risk outputs ─────────────────────────────────────────────────
+    calibrated_prob  = Column(Float)          # Platt-scaled win probability
+    kelly_fraction   = Column(Float)          # Half-Kelly position fraction
+    max_position_pct = Column(Float)          # max position as % of portfolio
+
+    # ── Memory agent analogs ──────────────────────────────────────────────────
+    analogs = Column(JSONB)                   # list of historical analog dicts
+
+    # ── Trade levels (ATR-based) ──────────────────────────────────────────────
+    entry_price  = Column(Float)              # latest close at time of analysis
+    stop_loss    = Column(Float)              # entry - 2×ATR
+    take_profit  = Column(Float)              # entry + 6×ATR (3:1 R:R)
+    atr_14       = Column(Float)              # 14-day ATR used for levels
 
 
 class Alert(Base):
@@ -212,4 +230,22 @@ class Alert(Base):
 
     __table_args__ = (
         Index("ix_alerts_generated_at_signal", "generated_at", "signal"),
+    )
+
+
+class Watchlist(Base):
+    """User watchlist — tickers the trader wants to monitor closely."""
+    __tablename__ = "watchlist"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    ticker     = Column(String, ForeignKey("stocks.ticker"), nullable=False, index=True)
+    added_at   = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    notes      = Column(Text, nullable=True)
+    priority   = Column(String, default="MEDIUM")   # HIGH / MEDIUM / LOW
+    is_active  = Column(Boolean, default=True)
+
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        Index("ix_watchlist_ticker_active", "ticker", "is_active"),
     )

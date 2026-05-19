@@ -64,6 +64,19 @@ async def get_signals(
     result = await db.execute(stmt)
     rows = result.fetchall()
 
+    # Batch-fetch latest prices for all tickers in this page
+    tickers_in_page = list({row[0].ticker for row in rows})
+    current_prices: dict = {}
+    if tickers_in_page:
+        price_q = text("""
+            SELECT DISTINCT ON (ticker) ticker, close
+            FROM stock_prices
+            WHERE ticker = ANY(:tickers)
+            ORDER BY ticker, time DESC
+        """)
+        price_r = await db.execute(price_q, {"tickers": tickers_in_page})
+        current_prices = {r.ticker: round(r.close, 2) for r in price_r.fetchall()}
+
     items = []
     for row in rows:
         alert, name, sector, country_code = row
@@ -81,6 +94,7 @@ async def get_signals(
             "image_url":       alert.image_url,
             "generated_at":    alert.generated_at,
             "is_read":         alert.is_read,
+            "current_price":   current_prices.get(alert.ticker),
         })
 
     return {

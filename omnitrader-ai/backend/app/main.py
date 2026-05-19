@@ -2,16 +2,18 @@
 OmniTrader AI — FastAPI Application
 =====================================
 Startup lifecycle:
-  1. On boot → check if stock_prices has < 100 rows → auto-trigger initial load
-  2. Schedule prices_intraday_flow()  5× per weekday (6:30, 8:00, 14:00, 17:30, 20:30 UTC)
-  3. Schedule prices_india_eod_flow() at 10:45 UTC weekdays (45 min after NSE close)
-  4. Schedule prices_us_eod_flow()    at 21:00 UTC weekdays (30 min after NYSE close)
-  5. Schedule daily_ingest_flow()     at 22:00 UTC weekdays (macro/sentiment/snapshots)
-  6. Schedule agents_daily_flow()     at 23:00 UTC weekdays (full agent batch scoring)
-  7. Schedule swing_trading_flow()    at 00:30 UTC weekdays (proactive swing setups)
-  8. Schedule weekly_ingest_flow()    every Sunday at 02:00 UTC
-  9. Schedule walk_forward_run()      every Sunday at 03:00 UTC (signal quality validation)
- 10. Schedule monthly_ingest_flow()   at 03:00 UTC on 1st of every month (13F, promoter)
+  1. On boot → run schema migrations (safe ALTER TABLE ADD COLUMN IF NOT EXISTS)
+  2. Check if stock_prices < 100 rows → auto-trigger full historical load
+  3. Schedule prices_intraday_flow()        5× per weekday (6:30, 8:00, 14:00, 17:30, 20:30 UTC)
+  4. Schedule prices_india_eod_flow()       at 10:45 UTC weekdays (45 min after NSE close)
+  5. Schedule prices_us_eod_flow()          at 21:00 UTC weekdays (30 min after NYSE close)
+  6. Schedule prices_nightly_gap_fill_flow() at 00:00 UTC daily (auto-backfill gaps/new IPOs)
+  7. Schedule daily_ingest_flow()           at 22:00 UTC weekdays (macro/sentiment/snapshots)
+  8. Schedule agents_daily_flow()           at 23:00 UTC weekdays (full agent batch scoring)
+  9. Schedule swing_trading_flow()          at 00:30 UTC weekdays (proactive swing setups)
+ 10. Schedule weekly_ingest_flow()          every Sunday at 02:00 UTC
+ 11. Schedule walk_forward_run()            every Sunday at 03:00 UTC (signal quality validation)
+ 12. Schedule monthly_ingest_flow()         at 03:00 UTC on 1st of every month (13F, promoter)
 """
 import asyncio
 import logging
@@ -24,6 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.core.config import settings
 from app.api import ingestion, agents
 from app.api import signals as signals_router
+from app.api import watchlist as watchlist_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -48,6 +51,11 @@ async def run_prices_us_eod():
     logger.info("[Scheduler] Starting prices_us_eod_flow...")
     from app.flows.prices_flow import prices_us_eod_flow
     await prices_us_eod_flow()
+
+async def run_prices_gap_fill():
+    logger.info("[Scheduler] Starting prices_nightly_gap_fill_flow...")
+    from app.flows.prices_flow import prices_nightly_gap_fill_flow
+    await prices_nightly_gap_fill_flow()
 
 
 # ── Ingestion flows ────────────────────────────────────────────────────────────
@@ -128,6 +136,23 @@ async def check_and_run_initial_load():
 async def lifespan(app: FastAPI):
     logger.info("OmniTrader AI starting up...")
 
+    # ── Run schema migrations (safe, idempotent) ───────────────────────────────
+    try:
+        from app.db.init_db import run_migrations
+        from app.db.session import engine
+        from app.db.base import Base
+        from app.models.market_data import (  # noqa: F401 — ensure all models registered
+            Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
+            NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
+            ChartSnapshot, AIAnalysis, Alert, Watchlist,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await run_migrations()
+        logger.info("[Boot] Schema up to date.")
+    except Exception as e:
+        logger.error("[Boot] Schema migration failed: %s", e)
+
     # ── Intraday price refresh: 5× per weekday ─────────────────────────────────
     for hour, minute in [(6, 30), (8, 0), (14, 0), (17, 30), (20, 30)]:
         scheduler.add_job(
@@ -142,6 +167,10 @@ async def lifespan(app: FastAPI):
                       id="prices_india_eod", replace_existing=True)
     scheduler.add_job(run_prices_us_eod, CronTrigger(hour=21, minute=0, day_of_week="mon-fri"),
                       id="prices_us_eod", replace_existing=True)
+
+    # ── Nightly gap fill: runs at midnight UTC every day ──────────────────────
+    scheduler.add_job(run_prices_gap_fill, CronTrigger(hour=0, minute=0),
+                      id="prices_gap_fill", replace_existing=True)
 
     # ── Daily ingestion pipeline ───────────────────────────────────────────────
     scheduler.add_job(run_daily, CronTrigger(hour=22, minute=0, day_of_week="mon-fri"),
@@ -169,6 +198,7 @@ async def lifespan(app: FastAPI):
         "  Intraday prices:  6:30, 8:00, 14:00, 17:30, 20:30 UTC (weekdays)\n"
         "  India EOD:        10:45 UTC weekdays\n"
         "  US EOD:           21:00 UTC weekdays\n"
+        "  Nightly gap fill: 00:00 UTC daily\n"
         "  Daily ingest:     22:00 UTC weekdays\n"
         "  Agent scoring:    23:00 UTC weekdays\n"
         "  Swing screener:   00:30 UTC weekdays\n"
@@ -194,8 +224,9 @@ app = FastAPI(
 )
 
 app.include_router(ingestion.router)
-app.include_router(agents.router,         prefix="/api/v1/agents", tags=["agents"])
-app.include_router(signals_router.router, prefix="/api/v1/agents", tags=["signals"])
+app.include_router(agents.router,              prefix="/api/v1/agents",    tags=["agents"])
+app.include_router(signals_router.router,      prefix="/api/v1/agents",    tags=["signals"])
+app.include_router(watchlist_router.router,    prefix="/api/v1/watchlist", tags=["watchlist"])
 
 import os
 from fastapi.staticfiles import StaticFiles

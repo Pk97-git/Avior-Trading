@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award } from 'lucide-react';
+import { LayoutDashboard, Database, Activity, Settings, Globe, Zap, Bell, Award, Star, BarChart2 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
 import Dashboard from './components/Dashboard';
@@ -7,15 +7,20 @@ import MarketAnalysis from './components/MarketAnalysis';
 import IntelligenceHub from './components/IntelligenceHub';
 import Compounders from './components/Compounders';
 import LiveJobsView from './components/LiveJobsView';
+import Watchlist from './components/Watchlist';
+import SignalPerformance from './components/SignalPerformance';
+import SettingsPage from './components/Settings';
 
 const TABS = [
-    { id: 'dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
-    { id: 'hub', label: 'Intelligence Hub', icon: Zap },
-    { id: 'market', label: 'Market Analysis', icon: Activity },
-    { id: 'compounders', label: 'Compounders', icon: Award },
-    { id: 'data', label: 'Data Ingestion', icon: Database },
-    { id: 'jobs', label: 'Active Jobs', icon: Activity }, // New Tab
-    { id: 'universe', label: 'Stock Universe', icon: Globe },
+    { id: 'dashboard',   label: 'Executive Dashboard', icon: LayoutDashboard },
+    { id: 'hub',         label: 'Intelligence Hub',    icon: Zap },
+    { id: 'watchlist',   label: 'Watchlist',           icon: Star },
+    { id: 'performance', label: 'Signal Performance',  icon: BarChart2 },
+    { id: 'market',      label: 'Market Analysis',     icon: Activity },
+    { id: 'compounders', label: 'Compounders',         icon: Award },
+    { id: 'data',        label: 'Data Ingestion',      icon: Database },
+    { id: 'jobs',        label: 'Active Jobs',         icon: Activity },
+    { id: 'universe',    label: 'Stock Universe',      icon: Globe },
 ];
 
 const TAB_LABELS = Object.fromEntries(TABS.map(t => [t.id, t.label]));
@@ -36,11 +41,9 @@ function NavItem({ icon: Icon, label, active, onClick }) {
 }
 
 export default function App() {
-    // tab + optional sub-state (e.g. pre-filled ticker for Hub)
     const [activeTab, setActiveTab] = useState('dashboard');
     const [hubTicker, setHubTicker] = useState(null);
 
-    // Allow child components to navigate to a tab, optionally passing extra data
     const handleNavigate = (tab, extra = null) => {
         if (tab === 'hub' && extra) setHubTicker(extra);
         setActiveTab(tab);
@@ -51,12 +54,12 @@ export default function App() {
 
             {/* ── Sidebar ── */}
             <aside className="w-56 border-r border-border bg-card/50 backdrop-blur-sm p-4 hidden md:flex flex-col shrink-0">
-                <div className="mb-8 px-2 flex items-center gap-2">
+                <div className="mb-6 px-2 flex items-center gap-2">
                     <Activity className="h-5 w-5 text-primary" />
                     <h1 className="text-lg font-bold tracking-tight">OmniTrader AI</h1>
                 </div>
 
-                <nav className="space-y-1 flex-1">
+                <nav className="space-y-1 flex-1 overflow-y-auto">
                     {TABS.filter(t => t.id !== 'settings').map(tab => (
                         <NavItem
                             key={tab.id}
@@ -68,7 +71,7 @@ export default function App() {
                     ))}
                 </nav>
 
-                <div className="mt-auto">
+                <div className="mt-auto pt-2 border-t border-border">
                     <NavItem
                         icon={Settings}
                         label="Settings"
@@ -92,9 +95,15 @@ export default function App() {
                     )}
                     {activeTab === 'hub' && (
                         <IntelligenceHub
-                            key={hubTicker}           // re-mount when ticker changes
+                            key={hubTicker}
                             initialTicker={hubTicker}
                         />
+                    )}
+                    {activeTab === 'watchlist' && (
+                        <Watchlist onNavigate={handleNavigate} />
+                    )}
+                    {activeTab === 'performance' && (
+                        <SignalPerformance />
                     )}
                     {activeTab === 'market' && (
                         <MarketAnalysis />
@@ -112,9 +121,7 @@ export default function App() {
                         <StockUniverse onNavigate={handleNavigate} />
                     )}
                     {activeTab === 'settings' && (
-                        <div className="flex items-center justify-center h-64 text-muted-foreground border border-dashed border-border rounded-lg text-sm">
-                            Settings — coming soon
-                        </div>
+                        <SettingsPage />
                     )}
                 </div>
             </main>

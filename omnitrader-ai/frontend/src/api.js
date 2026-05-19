@@ -36,6 +36,18 @@ export const agentsApi = {
 
     // Alert management
     markAlertsRead: (ids = []) => api.post('/agents/alerts/mark-read', ids),
+
+    // Performance & system
+    getSignalPerformance: (days = 90) => api.get('/agents/performance', { params: { days } }),
+    getSystemStatus: () => api.get('/agents/system-status'),
+};
+
+export const watchlistApi = {
+    getWatchlist: () => api.get('/watchlist'),
+    addTicker: (ticker, priority = 'MEDIUM', notes = null) =>
+        api.post(`/watchlist/${ticker.toUpperCase()}`, { priority, notes }),
+    removeTicker: (ticker) => api.delete(`/watchlist/${ticker.toUpperCase()}`),
+    updateEntry: (ticker, updates) => api.patch(`/watchlist/${ticker.toUpperCase()}`, updates),
 };
 
 export default api;

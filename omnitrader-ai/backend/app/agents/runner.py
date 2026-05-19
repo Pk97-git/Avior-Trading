@@ -306,13 +306,20 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "memory_thesis":           mem_result.get("thesis", []),
         "vision_thesis":           vision_result.get("thesis", []),
         "signal_thesis":           exec_result["signal_thesis"],
-        # Phase 2 extras
+        # Phase 2: strategist outputs (now stored in DB)
         "factor_scores":           factor_result.get("factor_scores", {}),
         "cross_asset_sensitivity": cross_asset_result.get("cross_asset_sensitivity", {}),
-        # Phase 3 risk
+        # Phase 3: risk outputs (now stored in DB)
         "calibrated_prob":         calibrated_prob,
         "kelly_fraction":          final_kelly,
         "max_position_pct":        final_position_pct,
+        # Memory analogs (stored so GET analysis returns them without re-running)
+        "analogs":                 mem_result.get("analogs", []),
+        # Trade levels from SizingEngine
+        "entry_price":             sizing_result.get("entry_price"),
+        "stop_loss":               sizing_result.get("stop_loss"),
+        "take_profit":             sizing_result.get("take_profit"),
+        "atr_14":                  sizing_result.get("atr_14"),
     }
 
     # ── Persist ──────────────────────────────────────────────────────────────
