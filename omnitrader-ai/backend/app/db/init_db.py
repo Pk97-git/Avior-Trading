@@ -7,7 +7,7 @@ from app.models.market_data import (
     Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
     NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
     ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
-    InsiderTransaction, AnalystRating,
+    InsiderTransaction, AnalystRating, StockTechnicals,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations
@@ -28,6 +28,10 @@ _MIGRATIONS = [
     # Insider transactions and analyst ratings new columns
     "ALTER TABLE insider_transactions ADD COLUMN IF NOT EXISTS form_type VARCHAR",
     "ALTER TABLE analyst_ratings ADD COLUMN IF NOT EXISTS price_target FLOAT",
+    # Stock technicals pre-computed indicator table
+    "CREATE TABLE IF NOT EXISTS stock_technicals (id SERIAL PRIMARY KEY, ticker VARCHAR REFERENCES stocks(ticker) ON DELETE CASCADE, date DATE NOT NULL, sma_20 FLOAT, sma_50 FLOAT, sma_200 FLOAT, ema_9 FLOAT, ema_21 FLOAT, rsi_14 FLOAT, macd FLOAT, macd_signal FLOAT, macd_hist FLOAT, atr_14 FLOAT, bb_upper FLOAT, bb_lower FLOAT, bb_mid FLOAT, vol_ratio FLOAT, week_52_high FLOAT, week_52_low FLOAT, rs_vs_spx FLOAT, rs_vs_nsei FLOAT, CONSTRAINT uq_stock_technicals_ticker_date UNIQUE (ticker, date))",
+    "CREATE INDEX IF NOT EXISTS idx_stock_technicals_ticker ON stock_technicals (ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_stock_technicals_date ON stock_technicals (date)",
 ]
 
 

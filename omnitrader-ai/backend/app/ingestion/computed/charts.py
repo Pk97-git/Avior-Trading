@@ -23,7 +23,9 @@ except ImportError:
     print("[WARN] mplfinance not installed. Run: pip install mplfinance")
 
 
-CHART_OUTPUT_DIR = "/tmp/omnitrader_charts"
+import pathlib as _pathlib
+_BASE_DIR = _pathlib.Path(__file__).resolve().parents[3]  # backend/
+CHART_OUTPUT_DIR = str(_BASE_DIR / "app" / "static" / "charts")
 os.makedirs(CHART_OUTPUT_DIR, exist_ok=True)
 
 

@@ -89,6 +89,8 @@ from app.flows.computed_flow import (
     computed_daily_flow,
     computed_weekly_flow,
 )
+from app.flows.analysts_flow import analysts_initial_flow, analysts_daily_flow
+from app.flows.insiders_flow import insiders_initial_flow, insiders_daily_flow
 
 logger = logging.getLogger(__name__)
 
@@ -116,22 +118,28 @@ async def full_initial_load_flow():
     logger.info("  FULL INITIAL LOAD — ALL DATA TYPES")
     logger.info("=" * 60)
 
-    logger.info("\n[1/6] ── PRICES ─────────────────────────────────────────")
+    logger.info("\n[1/8] ── PRICES ─────────────────────────────────────────")
     await prices_initial_flow()
 
-    logger.info("\n[2/6] ── FUNDAMENTALS ───────────────────────────────────")
+    logger.info("\n[2/8] ── FUNDAMENTALS ───────────────────────────────────")
     await fundamentals_initial_flow()
 
-    logger.info("\n[3/6] ── MACRO ──────────────────────────────────────────")
+    logger.info("\n[3/8] ── MACRO ──────────────────────────────────────────")
     await macro_initial_flow()
 
-    logger.info("\n[4/6] ── INSTITUTIONAL ──────────────────────────────────")
+    logger.info("\n[4/8] ── INSTITUTIONAL ──────────────────────────────────")
     await institutional_initial_flow()
 
-    logger.info("\n[5/6] ── SENTIMENT ──────────────────────────────────────")
+    logger.info("\n[5/8] ── SENTIMENT ──────────────────────────────────────")
     await sentiment_initial_flow()
 
-    logger.info("\n[6/6] ── COMPUTED ───────────────────────────────────────")
+    logger.info("\n[6/8] ── INSIDERS ───────────────────────────────────────")
+    await insiders_initial_flow()
+
+    logger.info("\n[7/8] ── ANALYSTS ───────────────────────────────────────")
+    await analysts_initial_flow()
+
+    logger.info("\n[8/8] ── COMPUTED ───────────────────────────────────────")
     await computed_initial_flow()
 
     logger.info("\n" + "=" * 60)
@@ -166,21 +174,10 @@ async def daily_ingest_flow():
 
     # Insider transactions + analyst ratings (daily refresh)
     try:
-        from app.db.session import AsyncSessionLocal
-        from app.ingestion.insider.form4 import SecForm4Service
-        from app.ingestion.core.analyst_ratings import AnalystRatingService
-        from app.ingestion.infra.universe import UniverseManager
-        async with AsyncSessionLocal() as db:
-            universe = UniverseManager()
-            high_tickers = [t for t in universe.get_tickers("HIGH")
-                            if not t.startswith("^") and "-USD" not in t][:50]
-            insider_svc  = SecForm4Service(db)
-            analyst_svc  = AnalystRatingService(db)
-            r1 = await insider_svc.run_batch(high_tickers)
-            r2 = await analyst_svc.run_batch(high_tickers)
-            logger.info("[Daily] Insiders: %s | Analysts: %s", r1, r2)
+        await insiders_daily_flow()
+        await analysts_daily_flow()
     except Exception as e:
-        logger.error("[Daily] Insider/Analyst ingestion failed: %s", e)
+        logger.error("[Daily] Insider/Analyst refresh failed: %s", e)
 
     logger.info("=== DAILY INGEST COMPLETE ===")
 

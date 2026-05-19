@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Index, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey, Boolean, Index, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -354,3 +354,44 @@ class AnalystRating(Base):
     __table_args__ = (
         Index("ix_analyst_ticker_date", "ticker", "date"),
     )
+
+
+class StockTechnicals(Base):
+    __tablename__ = "stock_technicals"
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_stock_technicals_ticker_date"),
+        {"timescaledb_hypertable": False},
+    )
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    ticker     = Column(String, ForeignKey("stocks.ticker", ondelete="CASCADE"), nullable=False, index=True)
+    date       = Column(Date, nullable=False, index=True)
+
+    # Trend
+    sma_20     = Column(Float)
+    sma_50     = Column(Float)
+    sma_200    = Column(Float)
+    ema_9      = Column(Float)
+    ema_21     = Column(Float)
+
+    # Momentum
+    rsi_14     = Column(Float)   # 0–100
+    macd       = Column(Float)   # MACD line (12 EMA - 26 EMA)
+    macd_signal = Column(Float)  # 9-day EMA of MACD
+    macd_hist  = Column(Float)   # macd - macd_signal
+
+    # Volatility
+    atr_14     = Column(Float)   # Average True Range (14 days)
+    bb_upper   = Column(Float)   # Bollinger upper band (20, 2σ)
+    bb_lower   = Column(Float)   # Bollinger lower band (20, 2σ)
+    bb_mid     = Column(Float)   # Bollinger midline (= SMA 20)
+
+    # Volume
+    vol_ratio  = Column(Float)   # today's volume / 20-day avg volume
+
+    # Key levels
+    week_52_high = Column(Float)
+    week_52_low  = Column(Float)
+
+    # Relative Strength vs benchmark
+    rs_vs_spx  = Column(Float)   # 3-month % return / SPX 3-month % return
+    rs_vs_nsei = Column(Float)   # 3-month % return / Nifty 3-month % return (India stocks only)

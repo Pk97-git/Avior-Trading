@@ -47,6 +47,7 @@ from app.db.session import AsyncSessionLocal
 from app.ingestion.infra.universe import UniverseManager
 from app.ingestion.computed.charts import ChartGenerationService
 from app.ingestion.computed.features import MarketSnapshotService
+from app.ingestion.computed.technicals import TechnicalIndicatorService
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,30 @@ async def task_snapshots() -> dict:
             "duration_s": round(time.monotonic() - _t, 1)}
 
 
+@task(name="Computed — Technical Indicators", retries=1)
+async def task_technicals(start_date=None) -> dict:
+    """
+    Computes SMA 20/50/200, EMA 9/21, RSI 14, MACD, ATR 14, Bollinger Bands,
+    volume ratio, 52-week high/low, and RS vs benchmark for all HIGH + MEDIUM
+    equity tickers. Upserts into stock_technicals table.
+
+    start_date=None  → full backfill (initial load)
+    start_date=today → incremental (only today's values)
+    """
+    from app.ingestion.infra.universe import UniverseManager
+    mgr = UniverseManager(use_cache=True, cache_ttl_hours=24)
+    _NON_EQUITY = ("-USD", "=F", ".NYB")
+    tickers = [
+        t for t in mgr.get_all_tickers("MEDIUM")
+        if not any(t.endswith(x) for x in _NON_EQUITY) and "^" not in t
+    ]
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = TechnicalIndicatorService(session)
+        result = await svc.run_batch(tickers, start_date=start_date)
+    return {**result, "duration_s": round(time.monotonic() - _t, 1)}
+
+
 # ══════════════════════════════════════════════════════════════
 # HISTORICAL — run once on fresh install
 # ══════════════════════════════════════════════════════════════
@@ -119,6 +144,8 @@ async def computed_initial_flow():
     logger.info("Charts: %s", r1)
     r2 = await task_snapshots()
     logger.info("Snapshots: %s", r2)
+    r3 = await task_technicals(start_date=None)
+    logger.info("Technicals (full backfill): %s", r3)
     logger.info("=== [Computed] Initial Load Complete ===")
 
 
@@ -136,6 +163,9 @@ async def computed_daily_flow():
     logger.info("=== [Computed] Daily Snapshots ===")
     result = await task_snapshots()
     logger.info("Snapshots: %s", result)
+    from datetime import date as _date
+    result2 = await task_technicals(start_date=_date.today())
+    logger.info("Technicals (today): %s", result2)
     logger.info("=== [Computed] Daily Snapshots Complete ===")
 
 
