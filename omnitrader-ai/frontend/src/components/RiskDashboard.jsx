@@ -222,29 +222,39 @@ export default function RiskDashboard() {
 
             {/* ── Header ── */}
             <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                    <h2 className="text-xl font-bold flex items-center gap-2">
-                        <ShieldAlert size={20} className="text-primary" />
-                        Risk Dashboard
-                    </h2>
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                        Portfolio VaR, exposure, correlations, and RS rankings
-                    </p>
+                <div className="flex items-center gap-2">
+                    <ShieldAlert size={20} className="text-primary" />
+                    <h2 className="text-lg font-bold text-foreground">Risk Dashboard</h2>
+                    {lastUpdated && (
+                        <span className="text-xs text-muted-foreground">
+                            Updated {lastUpdated.toLocaleTimeString()}
+                        </span>
+                    )}
                 </div>
                 <button
-                    onClick={() => { fetchRisk(); fetchCorr(); fetchRs(); }}
-                    className="flex items-center gap-1.5 text-xs border border-border rounded px-3 py-1.5 hover:bg-accent transition-colors"
+                    onClick={handleRefresh}
+                    disabled={loadingRisk || loadingCorr}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors text-xs font-medium disabled:opacity-50"
                 >
-                    <RefreshCw size={13} />
+                    <RefreshCw size={13} className={(loadingRisk || loadingCorr) ? 'animate-spin' : ''} />
                     Refresh
                 </button>
             </div>
 
+            {/* ── Loading ── */}
+            {(loadingRisk && loadingCorr) && (
+                <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+                    <Loader2 size={20} className="animate-spin" />
+                    <span className="text-sm">Loading risk analytics…</span>
+                </div>
+            )}
+
             {/* ── No positions placeholder ── */}
-            {!loadingRisk && !hasPositions && (
-                <div className="rounded-lg border border-border bg-card p-10 text-center">
-                    <ShieldAlert size={40} className="mx-auto text-muted-foreground mb-3 opacity-40" />
-                    <p className="text-muted-foreground">Open positions to see risk analytics.</p>
+            {!loadingRisk && !hasPositions && !loadingCorr && (
+                <div className="rounded-xl border border-border bg-card/50 p-10 text-center">
+                    <ShieldAlert size={40} className="mx-auto text-muted-foreground mb-3 opacity-30" />
+                    <p className="text-base font-medium text-muted-foreground">Open positions to see risk analytics.</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">Add stocks to your portfolio to enable risk analysis.</p>
                 </div>
             )}
 
