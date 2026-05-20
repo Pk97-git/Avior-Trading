@@ -9,6 +9,7 @@ from app.models.market_data import (
     ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
     InsiderTransaction, AnalystRating, StockTechnicals,
     ValuationMetrics, CandlestickPattern, EarningsTranscript, PairTrade,
+    InvestmentGoal,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations
@@ -98,6 +99,25 @@ _MIGRATIONS = [
     # Pair trades
     "CREATE TABLE IF NOT EXISTS pair_trades (id SERIAL PRIMARY KEY, symbol_a VARCHAR NOT NULL, symbol_b VARCHAR NOT NULL, sector VARCHAR, cointegration_pvalue FLOAT, correlation_90d FLOAT, spread_mean FLOAT, spread_std FLOAT, spread_zscore FLOAT, hedge_ratio FLOAT, signal VARCHAR, signal_strength VARCHAR, last_updated TIMESTAMPTZ, CONSTRAINT uq_pair_trade UNIQUE (symbol_a, symbol_b))",
     "CREATE INDEX IF NOT EXISTS ix_pair_trade_signal ON pair_trades (signal)",
+    # Investment goals
+    """
+CREATE TABLE IF NOT EXISTS investment_goals (
+    id                   SERIAL PRIMARY KEY,
+    user_id              VARCHAR(64) NOT NULL DEFAULT 'default',
+    goal_type            VARCHAR(32) NOT NULL,
+    name                 VARCHAR(128) NOT NULL,
+    target_amount        FLOAT NOT NULL,
+    current_amount       FLOAT DEFAULT 0,
+    target_date          DATE NOT NULL,
+    monthly_contribution FLOAT DEFAULT 0,
+    currency             VARCHAR(8) DEFAULT 'USD',
+    risk_profile         VARCHAR(16) DEFAULT 'MODERATE',
+    expected_return_pct  FLOAT,
+    notes                TEXT,
+    created_at           TIMESTAMPTZ DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ DEFAULT NOW()
+)
+""",
 ]
 
 

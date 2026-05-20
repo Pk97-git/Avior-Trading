@@ -174,6 +174,92 @@ async def get_portfolio_risk(db: AsyncSession = Depends(get_db)):
     vol_annual      = round(float(port_arr.std() * np.sqrt(252)), 6) if len(port_arr) >= 5 else None
     max_dd          = _max_drawdown(port_arr) if len(port_arr) >= 5 else None
 
+    # ── Sharpe Ratio ──────────────────────────────────────────────────────────
+    try:
+        rf_res = await db.execute(text("""
+            SELECT value FROM macro_data WHERE indicator = 'US10Y'
+            ORDER BY time DESC LIMIT 1
+        """))
+        rf_row = rf_res.fetchone()
+        risk_free_annual = float(rf_row.value) / 100 if rf_row else 0.045
+        risk_free_daily  = risk_free_annual / 252
+
+        # Use portfolio daily returns (from P&L history or price-weighted returns)
+        returns_res = await db.execute(text("""
+            SELECT DATE(sp.time) AS d,
+                   SUM(sp.close * p.quantity) AS port_value
+            FROM stock_prices sp
+            JOIN portfolio_positions p ON p.ticker = sp.ticker
+            WHERE p.status = 'OPEN' AND sp.time >= NOW() - INTERVAL '252 days'
+            GROUP BY DATE(sp.time)
+            ORDER BY d
+        """))
+        port_rows = returns_res.fetchall()
+
+        if len(port_rows) >= 20:
+            values = [r.port_value for r in port_rows]
+            daily_returns = [(values[i] - values[i-1]) / values[i-1]
+                             for i in range(1, len(values)) if values[i-1] > 0]
+            if daily_returns:
+                mean_r = sum(daily_returns) / len(daily_returns)
+                std_r = (sum((r - mean_r)**2 for r in daily_returns) / len(daily_returns))**0.5
+                sharpe = ((mean_r - risk_free_daily) / std_r * (252**0.5)) if std_r > 0 else None
+            else:
+                sharpe = None
+        else:
+            sharpe = None
+            port_rows = []
+    except Exception:
+        sharpe = None
+        port_rows = []
+
+    # ── Beta vs benchmark ─────────────────────────────────────────────────────
+    try:
+        # Determine dominant market (India vs US) from positions
+        country_res = await db.execute(text("""
+            SELECT s.country, COUNT(*) as n
+            FROM portfolio_positions p
+            JOIN stocks s ON s.ticker = p.ticker
+            WHERE p.status = 'OPEN'
+            GROUP BY s.country ORDER BY n DESC LIMIT 1
+        """))
+        country_row = country_res.fetchone()
+        benchmark = "^NSEI" if (country_row and country_row.country == "IN") else "SPY"
+
+        bench_res = await db.execute(text("""
+            SELECT DATE(time) as d, close
+            FROM stock_prices
+            WHERE ticker = :b AND time >= NOW() - INTERVAL '252 days'
+            ORDER BY d
+        """), {"b": benchmark})
+        bench_rows = bench_res.fetchall()
+
+        if len(bench_rows) >= 20 and len(port_rows) >= 20:
+            # Align dates
+            bench_map = {r.d: r.close for r in bench_rows}
+            port_map  = {r.d: r.port_value for r in port_rows}
+            common = sorted(set(bench_map) & set(port_map))
+
+            if len(common) >= 20:
+                port_vals  = [port_map[d] for d in common]
+                bench_vals = [bench_map[d] for d in common]
+                port_ret  = [(port_vals[i]-port_vals[i-1])/port_vals[i-1]  for i in range(1,len(port_vals))  if port_vals[i-1]>0]
+                bench_ret = [(bench_vals[i]-bench_vals[i-1])/bench_vals[i-1] for i in range(1,len(bench_vals)) if bench_vals[i-1]>0]
+                n = min(len(port_ret), len(bench_ret))
+                if n >= 10:
+                    cov = sum((port_ret[i]-sum(port_ret)/n)*(bench_ret[i]-sum(bench_ret)/n) for i in range(n)) / n
+                    var_b = sum((r-sum(bench_ret)/n)**2 for r in bench_ret) / n
+                    beta = cov / var_b if var_b > 0 else None
+                else:
+                    beta = None
+            else:
+                beta = None
+        else:
+            beta = None
+    except Exception:
+        beta = None
+        benchmark = "SPY"
+
     # ── Exposure percentages ──────────────────────────────────────────────────
     sector_exposure  = {k: round(v / total_portfolio_value * 100, 2)
                         for k, v in sector_values.items()}
@@ -191,6 +277,9 @@ async def get_portfolio_risk(db: AsyncSession = Depends(get_db)):
         "cvar_95":                    cvar_95,
         "portfolio_volatility_annualized": vol_annual,
         "max_drawdown_90d":           max_dd,
+        "sharpe_ratio":               round(sharpe, 4) if sharpe is not None else None,
+        "beta":                       round(beta, 4) if beta is not None else None,
+        "beta_benchmark":             benchmark,
         "sector_exposure":            sector_exposure,
         "country_exposure":           country_exposure,
         "largest_positions":          largest_positions,

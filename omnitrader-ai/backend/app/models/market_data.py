@@ -4,6 +4,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
 from app.db.base import Base
 import datetime
+from datetime import datetime as _dt
 
 
 
@@ -706,3 +707,22 @@ class PairTrade(Base):
     signal               = Column(String, nullable=True)  # "LONG_A_SHORT_B", "LONG_B_SHORT_A", "NEUTRAL"
     signal_strength      = Column(String, nullable=True)  # "STRONG", "MODERATE", "WEAK"
     last_updated         = Column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class InvestmentGoal(Base):
+    __tablename__ = "investment_goals"
+
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    user_id              = Column(String(64), default="default", nullable=False)
+    goal_type            = Column(String(32), nullable=False)   # RETIREMENT | HOUSE | PASSIVE_INCOME | AGGRESSIVE_GROWTH | CUSTOM
+    name                 = Column(String(128), nullable=False)
+    target_amount        = Column(Float, nullable=False)        # target portfolio value in base currency
+    current_amount       = Column(Float, default=0.0)           # last computed snapshot
+    target_date          = Column(Date, nullable=False)
+    monthly_contribution = Column(Float, default=0.0)           # additional monthly savings
+    currency             = Column(String(8), default="USD")
+    risk_profile         = Column(String(16), default="MODERATE")  # CONSERVATIVE | MODERATE | AGGRESSIVE
+    expected_return_pct  = Column(Float)                        # annualised, overrides default if set
+    notes                = Column(Text)
+    created_at           = Column(DateTime(timezone=True), default=lambda: _dt.utcnow())
+    updated_at           = Column(DateTime(timezone=True), default=lambda: _dt.utcnow(), onupdate=lambda: _dt.utcnow())
