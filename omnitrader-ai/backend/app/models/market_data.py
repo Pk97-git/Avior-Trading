@@ -183,7 +183,7 @@ class AIAnalysis(Base):
 
     # ── Executive Trader output ───────────────────────────────────────────────
     final_score = Column(Integer)           # weighted composite 0–100
-    signal      = Column(String)            # STRONG_BUY / ACCUMULATE / AVOID / DISTRIBUTION
+    signal      = Column(String)            # BUY / HOLD / REDUCE / SELL
     regime      = Column(String)            # macro regime label at time of analysis
 
     # ── Per-agent narrative theses ────────────────────────────────────────────
@@ -269,7 +269,7 @@ class PortfolioPosition(Base):
     position_value = Column(Float)                           # entry_price * shares
     stop_loss      = Column(Float)
     take_profit    = Column(Float)
-    signal         = Column(String)                          # STRONG_BUY / ACCUMULATE / etc
+    signal         = Column(String)                          # BUY / HOLD / REDUCE / SELL
     regime         = Column(String)                          # macro regime at entry
     notes          = Column(Text)
     # Closing fields

@@ -140,7 +140,7 @@ async def get_signal_performance(
                 ORDER BY time ASC LIMIT 1
             ) p30 ON true
             WHERE a.analysis_date >= :since
-              AND a.signal IN ('STRONG_BUY', 'ACCUMULATE', 'AVOID', 'DISTRIBUTION')
+              AND a.signal IN ('BUY', 'HOLD', 'REDUCE', 'SELL')
         )
         SELECT
             signal,
@@ -153,9 +153,9 @@ async def get_signal_performance(
                 END
             )::numeric, 2)                                              AS avg_return_30d,
             ROUND(AVG(final_score)::numeric, 1)                        AS avg_score,
-            COUNT(CASE WHEN signal IN ('STRONG_BUY','ACCUMULATE')
+            COUNT(CASE WHEN signal = 'BUY'
                        AND price_30d_later > price_at_signal THEN 1 END) AS buy_wins,
-            COUNT(CASE WHEN signal IN ('DISTRIBUTION')
+            COUNT(CASE WHEN signal IN ('SELL', 'REDUCE')
                        AND price_30d_later < price_at_signal THEN 1 END) AS dist_wins
         FROM analysis_with_prices
         GROUP BY signal
@@ -177,9 +177,9 @@ async def get_signal_performance(
         dist_wins = row.dist_wins or 0
 
         # Hit rate = wins / outcomes (directional correctness)
-        if row.signal in ("STRONG_BUY", "ACCUMULATE"):
+        if row.signal == "BUY":
             hit_rate = round(buy_wins / with_outcome * 100, 1) if with_outcome > 0 else None
-        elif row.signal == "DISTRIBUTION":
+        elif row.signal in ("SELL", "REDUCE"):
             hit_rate = round(dist_wins / with_outcome * 100, 1) if with_outcome > 0 else None
         else:
             hit_rate = None

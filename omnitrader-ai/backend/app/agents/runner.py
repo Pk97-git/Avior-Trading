@@ -46,6 +46,18 @@ try:
 except ImportError:
     _TRANSCRIPT_AVAILABLE = False
 
+try:
+    from app.agents.risk import RiskAgent
+    _RISK_AGENT_AVAILABLE = True
+except ImportError:
+    _RISK_AGENT_AVAILABLE = False
+
+try:
+    from app.agents.news import NewsAgent
+    _NEWS_AGENT_AVAILABLE = True
+except ImportError:
+    _NEWS_AGENT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 ALERT_COOLDOWN_HOURS  = 4
@@ -181,7 +193,7 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         return {
             "ticker": ticker,
             "analysis_date": analysis_date.isoformat(),
-            "signal": "AVOID",
+            "signal": "REDUCE",
             "final_score": 30,
             "regime": "Unknown",
             "circuit_breaker": cb_state,
@@ -227,6 +239,20 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     except Exception as e:
         vision_result = e
 
+    risk_result = {"score": 50, "thesis": [], "risk_flags": []}
+    if _RISK_AGENT_AVAILABLE:
+        try:
+            risk_result = await RiskAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("RiskAgent failed for %s: %s", ticker, e)
+
+    news_result = {"score": 50, "thesis": [], "breaking_event": None}
+    if _NEWS_AGENT_AVAILABLE:
+        try:
+            news_result = await NewsAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("NewsAgent failed for %s: %s", ticker, e)
+
     transcript_result = {"score": 50, "thesis": [], "summary": None}
     if _TRANSCRIPT_AVAILABLE:
         try:
@@ -247,6 +273,12 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     sent_result   = _safe(sent_result,   name="Sentiment")
     mem_result    = _safe(mem_result,    name="Memory")
     vision_result = _safe(vision_result, name="Vision")
+
+    # Blend breaking news (48h) into sentiment score — news velocity matters
+    if news_result.get("thesis"):
+        n_delta = news_result["score"] - 50
+        sent_result["score"] = max(0, min(100, sent_result["score"] + round(n_delta * 0.25)))
+        sent_result.setdefault("thesis", []).extend(news_result["thesis"])
 
     # Blend transcript guidance/tone into fundamental score (minor adjustment)
     if transcript_result.get("thesis"):
@@ -305,6 +337,7 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         sentiment_score     = sent_result["score"],
         vision_score        = vision_result.get("score", 50),
         factor_score        = factor_result.get("score", 50),
+        risk_score          = risk_result["score"],
         fundamental_thesis   = fund_result.get("thesis"),
         technical_thesis     = tech_result.get("thesis"),
         macro_thesis         = macro_result.get("thesis"),
@@ -312,6 +345,7 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         sentiment_thesis     = sent_result.get("thesis"),
         vision_thesis        = vision_result.get("thesis"),
         factor_thesis        = factor_result.get("thesis"),
+        risk_thesis          = risk_result.get("thesis"),
         regime               = regime,
         weight_nudge         = weight_nudge or None,
     )
@@ -372,6 +406,12 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "atr_14":                  sizing_result.get("atr_14"),
         # Transcript intelligence
         "earnings_summary":        transcript_result.get("summary"),
+        # Risk agent outputs
+        "risk_score":              risk_result["score"],
+        "risk_flags":              risk_result.get("risk_flags", []),
+        "risk_thesis":             risk_result.get("thesis", []),
+        # Breaking news
+        "breaking_news":           news_result.get("breaking_event"),
     }
 
     # ── Persist ──────────────────────────────────────────────────────────────
@@ -391,6 +431,42 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         await db.commit()
         logger.info("Saved analysis for %s: signal=%s score=%d kelly=%.1f%%",
                     ticker, exec_result["signal"], exec_result["final_score"], final_position_pct)
+
+        # Auto-execution (opt-in via AUTO_EXECUTE env var)
+        import os
+        if os.getenv("AUTO_EXECUTE", "false").lower() == "true":
+            try:
+                from app.services.order_manager import OrderManager
+                order_mgr = OrderManager(db)
+                signal = exec_result["signal"]
+
+                if signal == "BUY":
+                    await order_mgr.submit_from_analysis(ticker, exec_result, sizing_result)
+                    logger.info("[AutoExec] BUY order submitted for %s", ticker)
+
+                elif signal == "REDUCE":
+                    # Partial exit — reduce position by 50%
+                    pos_res = await db.execute(text("""
+                        SELECT id, quantity, avg_price FROM portfolio_positions
+                        WHERE ticker = :t AND status = 'OPEN' LIMIT 1
+                    """), {"t": ticker})
+                    pos = pos_res.fetchone()
+                    if pos and pos.quantity > 0:
+                        reduce_qty = max(1, pos.quantity // 2)
+                        await order_mgr.submit_reduce(ticker, reduce_qty, exec_result)
+                        logger.info("[AutoExec] REDUCE order (%d shares) submitted for %s", reduce_qty, ticker)
+
+                elif signal == "SELL":
+                    pos_res = await db.execute(text("""
+                        SELECT id, quantity FROM portfolio_positions
+                        WHERE ticker = :t AND status = 'OPEN' LIMIT 1
+                    """), {"t": ticker})
+                    pos = pos_res.fetchone()
+                    if pos and pos.quantity > 0:
+                        await order_mgr.submit_sell(ticker, pos.quantity, exec_result)
+                        logger.info("[AutoExec] SELL order submitted for %s", ticker)
+            except Exception as e:
+                logger.error("[AutoExec] Order submission failed for %s: %s", ticker, e)
 
     except Exception as e:
         await db.rollback()

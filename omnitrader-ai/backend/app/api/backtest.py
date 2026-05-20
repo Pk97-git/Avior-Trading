@@ -32,7 +32,7 @@ class BacktestRequest(BaseModel):
     end_date:       date                = Field(..., description="Backtest end date (YYYY-MM-DD)")
     initial_capital: float             = Field(100_000.0, ge=1_000, description="Starting portfolio cash")
     signal_filter:  List[str]          = Field(
-        default=["STRONG_BUY", "ACCUMULATE"],
+        default=["BUY"],
         description="Signals that trigger entry",
     )
     max_positions:  int                 = Field(10, ge=1, le=100, description="Max concurrent positions")
@@ -62,7 +62,7 @@ async def run_backtest(
     if (req.end_date - req.start_date).days < 5:
         raise HTTPException(status_code=422, detail="Backtest window must be at least 5 days")
 
-    valid_signals = {"STRONG_BUY", "ACCUMULATE", "AVOID", "DISTRIBUTION"}
+    valid_signals = {"BUY", "HOLD", "REDUCE", "SELL", "PROACTIVE_SWING"}
     bad_signals = [s for s in req.signal_filter if s.upper() not in valid_signals]
     if bad_signals:
         raise HTTPException(
@@ -271,11 +271,11 @@ async def quick_stats(
     }
 
     # Top 10 performers by implied return
-    buy_side = [p for p in all_performers if p["signal"] in ("STRONG_BUY", "ACCUMULATE")]
+    buy_side = [p for p in all_performers if p["signal"] == "BUY"]
     top_performers = sorted(buy_side, key=lambda x: x["implied_return_pct"], reverse=True)[:10]
 
     total_signals = len(signal_rows)
-    total_returns = [p["implied_return_pct"] for p in all_performers if p["signal"] in ("STRONG_BUY", "ACCUMULATE")]
+    total_returns = [p["implied_return_pct"] for p in all_performers if p["signal"] == "BUY"]
     avg_long_return = round(sum(total_returns) / len(total_returns), 4) if total_returns else 0.0
 
     return {

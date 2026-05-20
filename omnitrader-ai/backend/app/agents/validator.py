@@ -124,8 +124,8 @@ class WalkForwardValidator:
         can load them at score time.
         """
         by_signal = perf.get("by_signal", {})
-        buy_hr  = by_signal.get("STRONG_BUY", {}).get("hit_rate", 0.5)
-        dist_hr = by_signal.get("DISTRIBUTION", {}).get("hit_rate", 0.5)
+        buy_hr  = by_signal.get("BUY", {}).get("hit_rate", 0.5)
+        dist_hr = by_signal.get("SELL", {}).get("hit_rate", 0.5)
 
         nudges: dict[str, float] = {}
 

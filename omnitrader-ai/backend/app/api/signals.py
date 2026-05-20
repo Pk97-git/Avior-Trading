@@ -154,7 +154,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         .join(Stock, AIAnalysis.ticker == Stock.ticker, isouter=True)
         .where(
             AIAnalysis.analysis_date >= today,
-            AIAnalysis.signal.in_(["STRONG_BUY", "ACCUMULATE"]),
+            AIAnalysis.signal.in_(["BUY"]),
             AIAnalysis.final_score.isnot(None),
         )
         .order_by(AIAnalysis.final_score.desc())

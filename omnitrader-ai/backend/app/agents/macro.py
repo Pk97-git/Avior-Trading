@@ -140,6 +140,55 @@ class MacroAgent:
             except Exception:
                 pass
 
+        # ── Market breadth: % of stocks above their 200-day SMA ─────────────
+        try:
+            # Market breadth: % stocks above 200-day SMA
+            breadth_res = await self.db.execute(text("""
+                SELECT
+                    COUNT(*) FILTER (WHERE sma_200 IS NOT NULL AND close > sma_200)::float /
+                    NULLIF(COUNT(*) FILTER (WHERE sma_200 IS NOT NULL), 0) AS pct_above_200
+                FROM stock_technicals st
+                JOIN stock_prices sp ON sp.ticker = st.ticker
+                WHERE st.date = (SELECT MAX(date) FROM stock_technicals)
+                  AND sp.time = (SELECT MAX(time) FROM stock_prices WHERE ticker = st.ticker)
+            """))
+            breadth_row = breadth_res.fetchone()
+            if breadth_row and breadth_row.pct_above_200 is not None:
+                pct = float(breadth_row.pct_above_200)
+                if pct > 0.70:
+                    score += 12
+                    thesis.append(f"Broad market healthy: {pct:.0%} of stocks above 200 SMA — rising tide.")
+                elif pct > 0.55:
+                    score += 6
+                    thesis.append(f"Market breadth positive: {pct:.0%} above 200 SMA.")
+                elif pct < 0.35:
+                    score -= 12
+                    thesis.append(f"Market breadth deteriorating: only {pct:.0%} above 200 SMA — broad weakness.")
+                elif pct < 0.45:
+                    score -= 6
+                    thesis.append(f"Weak breadth: {pct:.0%} above 200 SMA.")
+        except Exception:
+            pass
+
+        # Advance/Decline ratio
+        try:
+            adv_res = await self.db.execute(text("""
+                SELECT value FROM macro_data
+                WHERE indicator = 'ADVANCE_DECLINE_RATIO'
+                ORDER BY time DESC LIMIT 1
+            """))
+            adv_row = adv_res.fetchone()
+            if adv_row:
+                adr = adv_row.value
+                if adr > 1.5:
+                    score += 6
+                    thesis.append(f"Advance/Decline ratio {adr:.2f} — more stocks advancing than declining.")
+                elif adr < 0.7:
+                    score -= 6
+                    thesis.append(f"Advance/Decline ratio {adr:.2f} — broad selling pressure.")
+        except Exception:
+            pass
+
         score = max(0, min(100, score))
         logger.info("MacroAgent %s: score=%d regime=%s", self.ticker, score, regime)
 

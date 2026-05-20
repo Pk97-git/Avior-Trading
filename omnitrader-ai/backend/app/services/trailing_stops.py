@@ -10,8 +10,8 @@ Strategy:
     5. If current_price <= current stop_loss → flag for exit (return in needs_exit list)
 
   ATR_multiplier defaults:
-    - STRONG_BUY signal: 2.0× ATR (give room to breathe)
-    - ACCUMULATE: 2.5× ATR
+    - BUY signal: 2.0× ATR (give room to breathe)
+    - HOLD: 2.5× ATR
     - PROACTIVE_SWING: 1.5× ATR (tighter, swing trade)
     - default: 2.0× ATR
 
@@ -33,8 +33,9 @@ from app.models.market_data import PortfolioPosition, StockPrice
 logger = logging.getLogger("omnitrader.trailing_stops")
 
 ATR_MULTIPLIER = {
-    "STRONG_BUY": 2.0,
-    "ACCUMULATE": 2.5,
+    "BUY": 2.0,
+    "HOLD": 2.5,
+    "REDUCE": 1.8,
     "PROACTIVE_SWING": 1.5,
 }
 DEFAULT_MULTIPLIER = 2.0

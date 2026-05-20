@@ -151,10 +151,10 @@ class OrderManager:
             }
 
         signal = (analysis.get("signal") or "").upper()
-        if signal not in ("STRONG_BUY", "ACCUMULATE"):
+        if signal != "BUY":
             return {
                 "status": "skipped",
-                "reason": f"Signal '{signal}' is not actionable (need STRONG_BUY or ACCUMULATE)",
+                "reason": f"Signal '{signal}' is not actionable for entry (need BUY)",
                 "order_id": None,
             }
 
@@ -272,6 +272,196 @@ class OrderManager:
             "qty":      qty,
             "order_type": order_type,
             "limit_price": limit_price,
+        }
+
+    async def submit_reduce(
+        self,
+        ticker: str,
+        quantity: int,
+        analysis: dict,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Submit a partial exit order (REDUCE signal — sell specified quantity).
+
+        Routes through the same broker factory as submit_from_analysis but
+        with side=SELL and the caller-supplied quantity.
+
+        Returns:
+            {
+                "status":   "submitted" | "skipped" | "halted",
+                "reason":   str,
+                "order_id": int | None,
+            }
+        """
+        ticker = ticker.upper()
+
+        # Circuit breaker (soft check — REDUCE is a defensive action, don't block on CAUTION)
+        cb_engine = CircuitBreakerEngine(self.db)
+        cb = await cb_engine.check()
+        if cb["status"] == "HALT":
+            reason = "; ".join(cb["reasons"]) or "Circuit breaker HALT"
+            logger.warning("[OrderManager] HALT for REDUCE %s: %s", ticker, reason)
+            return {"status": "halted", "reason": reason, "order_id": None}
+
+        if quantity <= 0:
+            return {"status": "skipped", "reason": "quantity must be positive", "order_id": None}
+
+        country = await self._get_stock_country(ticker)
+        broker = get_broker(country)
+
+        current_price = await self._latest_price(ticker)
+        market_open = broker.is_market_open(country)
+        if market_open:
+            order_type = "MARKET"
+            limit_price = None
+        else:
+            order_type = "LIMIT"
+            limit_price = round(current_price, 4) if current_price else None
+
+        signal = (analysis.get("signal") or "REDUCE").upper()
+        final_score = analysis.get("final_score")
+
+        result = await broker.place_order(
+            ticker=ticker,
+            side="SELL",
+            qty=quantity,
+            order_type=order_type,
+            limit_price=limit_price,
+        )
+        logger.info(
+            "[OrderManager] REDUCE %s: qty=%d broker_id=%s status=%s",
+            ticker, quantity, result.broker_order_id, result.status,
+        )
+
+        now = datetime.now(timezone.utc)
+        order = Order(
+            ticker=ticker,
+            created_at=now,
+            side="SELL",
+            order_type=order_type,
+            qty=float(quantity),
+            limit_price=limit_price,
+            broker=broker.name,
+            broker_order_id=result.broker_order_id,
+            status=result.status,
+            filled_qty=result.filled_qty,
+            filled_price=result.filled_price,
+            filled_at=now if result.status == "FILLED" else None,
+            signal=signal,
+            final_score=final_score,
+            notes=notes or result.message,
+        )
+        self.db.add(order)
+        await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(order)
+
+        return {
+            "status":          "submitted",
+            "reason":          result.message,
+            "order_id":        order.id,
+            "broker":          broker.name,
+            "broker_order_id": result.broker_order_id,
+            "order_status":    result.status,
+            "qty":             quantity,
+            "order_type":      order_type,
+            "limit_price":     limit_price,
+        }
+
+    async def submit_sell(
+        self,
+        ticker: str,
+        quantity: int,
+        analysis: dict,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Submit a full exit order (SELL signal).
+
+        Routes through the same broker factory as submit_from_analysis but
+        with side=SELL for the full position quantity.
+
+        Returns:
+            {
+                "status":   "submitted" | "skipped" | "halted",
+                "reason":   str,
+                "order_id": int | None,
+            }
+        """
+        ticker = ticker.upper()
+
+        # Circuit breaker (soft check — SELL is a defensive action, don't block on CAUTION)
+        cb_engine = CircuitBreakerEngine(self.db)
+        cb = await cb_engine.check()
+        if cb["status"] == "HALT":
+            reason = "; ".join(cb["reasons"]) or "Circuit breaker HALT"
+            logger.warning("[OrderManager] HALT for SELL %s: %s", ticker, reason)
+            return {"status": "halted", "reason": reason, "order_id": None}
+
+        if quantity <= 0:
+            return {"status": "skipped", "reason": "quantity must be positive", "order_id": None}
+
+        country = await self._get_stock_country(ticker)
+        broker = get_broker(country)
+
+        current_price = await self._latest_price(ticker)
+        market_open = broker.is_market_open(country)
+        if market_open:
+            order_type = "MARKET"
+            limit_price = None
+        else:
+            order_type = "LIMIT"
+            limit_price = round(current_price, 4) if current_price else None
+
+        signal = (analysis.get("signal") or "SELL").upper()
+        final_score = analysis.get("final_score")
+
+        result = await broker.place_order(
+            ticker=ticker,
+            side="SELL",
+            qty=quantity,
+            order_type=order_type,
+            limit_price=limit_price,
+        )
+        logger.info(
+            "[OrderManager] SELL %s: qty=%d broker_id=%s status=%s",
+            ticker, quantity, result.broker_order_id, result.status,
+        )
+
+        now = datetime.now(timezone.utc)
+        order = Order(
+            ticker=ticker,
+            created_at=now,
+            side="SELL",
+            order_type=order_type,
+            qty=float(quantity),
+            limit_price=limit_price,
+            broker=broker.name,
+            broker_order_id=result.broker_order_id,
+            status=result.status,
+            filled_qty=result.filled_qty,
+            filled_price=result.filled_price,
+            filled_at=now if result.status == "FILLED" else None,
+            signal=signal,
+            final_score=final_score,
+            notes=notes or result.message,
+        )
+        self.db.add(order)
+        await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(order)
+
+        return {
+            "status":          "submitted",
+            "reason":          result.message,
+            "order_id":        order.id,
+            "broker":          broker.name,
+            "broker_order_id": result.broker_order_id,
+            "order_status":    result.status,
+            "qty":             quantity,
+            "order_type":      order_type,
+            "limit_price":     limit_price,
         }
 
     async def submit_manual(

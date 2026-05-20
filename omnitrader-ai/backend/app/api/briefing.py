@@ -33,27 +33,27 @@ _cache: dict = {"report": None, "generated_at": None}
 CACHE_TTL_MINUTES = 30
 
 SIGNAL_RANK = {
-    "STRONG_BUY":      1,
-    "ACCUMULATE":      2,
+    "BUY":             1,
+    "HOLD":            2,
     "PROACTIVE_SWING": 3,
-    "AVOID":           4,
-    "DISTRIBUTION":    5,
+    "REDUCE":          4,
+    "SELL":            5,
 }
 
 SIGNAL_LABEL = {
-    "STRONG_BUY":      "Strong Buy",
-    "ACCUMULATE":      "Accumulate",
+    "BUY":             "Buy",
+    "HOLD":            "Hold",
     "PROACTIVE_SWING": "Swing Setup",
-    "AVOID":           "Avoid",
-    "DISTRIBUTION":    "Distribution / Sell",
+    "REDUCE":          "Reduce",
+    "SELL":            "Sell",
 }
 
 SIGNAL_COLOR = {
-    "STRONG_BUY":      "green",
-    "ACCUMULATE":      "blue",
+    "BUY":             "green",
+    "HOLD":            "blue",
     "PROACTIVE_SWING": "purple",
-    "AVOID":           "yellow",
-    "DISTRIBUTION":    "red",
+    "REDUCE":          "yellow",
+    "SELL":            "red",
 }
 
 
@@ -444,9 +444,9 @@ async def _build_report(db: AsyncSession) -> dict:
             analyst_signal=analyst_sigs.get(t) if isinstance(analyst_sigs, dict) else None,
         )
 
-        if signal in ("STRONG_BUY", "ACCUMULATE", "PROACTIVE_SWING"):
+        if signal in ("BUY", "PROACTIVE_SWING"):
             buys.append(card)
-        elif signal in ("DISTRIBUTION", "AVOID"):
+        elif signal in ("SELL", "REDUCE"):
             sells.append(card)
         else:
             holds.append(card)

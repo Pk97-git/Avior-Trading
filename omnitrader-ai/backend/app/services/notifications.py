@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 
 # Emoji map keyed by signal name
 _SIGNAL_EMOJI = {
-    "STRONG_BUY":     "🟢",
-    "ACCUMULATE":     "🔵",
+    "BUY":            "🟢",
+    "HOLD":           "🔵",
+    "REDUCE":         "🟡",
+    "SELL":           "🔴",
     "PROACTIVE_SWING": "🟣",
-    "AVOID":          "🟡",
-    "DISTRIBUTION":   "🔴",
 }
 
 

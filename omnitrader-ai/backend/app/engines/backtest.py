@@ -5,7 +5,7 @@ Core BacktestEngine — simulates historical trading performance using
 signals stored in `ai_analysis` and OHLCV data from `stock_prices`.
 
 Entry  : next available close price after signal date
-Exit   : stop-loss / take-profit / max-hold / new DISTRIBUTION|AVOID signal
+Exit   : stop-loss / take-profit / max-hold / new SELL|REDUCE signal
 Sizing : half-Kelly (capped at 20%) or equal-weight fallback
 Output : equity curve, trade log, monthly returns, portfolio metrics
 """
@@ -29,7 +29,7 @@ EXIT_TARGET = "TARGET"
 EXIT_TIME   = "TIME"
 EXIT_SIGNAL = "SIGNAL"
 
-NEGATIVE_SIGNALS = {"DISTRIBUTION", "AVOID"}
+NEGATIVE_SIGNALS = {"SELL", "REDUCE"}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ class BacktestEngine:
     start_date      : first date of backtest window
     end_date        : last date of backtest window
     initial_capital : starting cash (default 100 000)
-    signal_filter   : which signals trigger entry (default STRONG_BUY + ACCUMULATE)
+    signal_filter   : which signals trigger entry (default BUY)
     max_positions   : concurrent open position limit (default 10)
     use_kelly       : use half-Kelly sizing when available (default True)
     max_kelly_pct   : cap on Kelly-sized position as fraction of portfolio (default 0.20)
@@ -120,7 +120,7 @@ class BacktestEngine:
         self.start_date = start_date
         self.end_date = end_date
         self.initial_capital = initial_capital
-        self.signal_filter = [s.upper() for s in (signal_filter or ["STRONG_BUY", "ACCUMULATE"])]
+        self.signal_filter = [s.upper() for s in (signal_filter or ["BUY"])]
         self.max_positions = max_positions
         self.use_kelly = use_kelly
         self.max_kelly_pct = max_kelly_pct
@@ -132,7 +132,7 @@ class BacktestEngine:
     async def _load_signals(self) -> list[dict]:
         """
         Fetch all ai_analysis rows in the date range that match signal_filter.
-        Also loads DISTRIBUTION/AVOID signals for the same period so we can
+        Also loads SELL/REDUCE signals for the same period so we can
         detect adverse signal flips on open positions.
         """
         params: dict[str, Any] = {
@@ -187,7 +187,7 @@ class BacktestEngine:
 
     async def _load_adverse_signals(self) -> dict[str, set[date]]:
         """
-        Load DISTRIBUTION/AVOID signal dates per ticker so we can detect
+        Load SELL/REDUCE signal dates per ticker so we can detect
         adverse flips while a position is open.
         """
         params: dict[str, Any] = {
@@ -206,7 +206,7 @@ class BacktestEngine:
             JOIN stocks s ON s.ticker = a.ticker
             WHERE a.analysis_date >= :start
               AND a.analysis_date <= :end
-              AND a.signal = ANY(ARRAY['DISTRIBUTION','AVOID'])
+              AND a.signal = ANY(ARRAY['SELL','REDUCE'])
               {country_clause}
         """)
         result = await self.db.execute(sql, params)
