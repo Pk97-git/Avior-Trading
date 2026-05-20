@@ -26,6 +26,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market_data import Order, PortfolioPosition, Stock
+from app.brokers.base import BracketOrderResult
 from app.brokers.factory import get_broker
 from app.engines.circuit_breaker import CircuitBreakerEngine
 
@@ -825,7 +826,6 @@ class OrderManager:
         eff_entry_price = entry_price if entry_type.upper() == "LIMIT" else None
 
         try:
-            from app.brokers.base import BracketOrderResult
             result = await broker.place_bracket_order(
                 ticker=ticker,
                 side="BUY",
