@@ -132,4 +132,17 @@ export const trailingStopsApi = {
     setConfig:   (body) => api.put('/trailing-stops/config', body),
 };
 
+export const chartsApi = {
+    getOHLCV: (ticker, period = '1y', interval = '1d') =>
+        api.get(`/charts/ohlcv/${ticker.toUpperCase()}`, { params: { period, interval } }),
+    getAnnotations: (ticker, days = 365) =>
+        api.get(`/charts/annotations/${ticker.toUpperCase()}`, { params: { days } }),
+    getSectorHeatmap: (period = '1mo', country = 'IN') =>
+        api.get('/charts/heatmap/sectors', { params: { period, country } }),
+    getMarketHeatmap: (metric = 'return_1d', country = 'IN', limit = 50) =>
+        api.get('/charts/heatmap/market', { params: { metric, country, limit } }),
+    getMultiTimeframe: (ticker) =>
+        api.get(`/charts/multi/${ticker.toUpperCase()}`),
+};
+
 export default api;

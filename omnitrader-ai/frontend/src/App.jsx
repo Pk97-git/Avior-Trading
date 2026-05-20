@@ -26,6 +26,7 @@ import DailyBriefing from './components/DailyBriefing';
 import InsiderActivity from './components/InsiderActivity';
 import AnalystRatings from './components/AnalystRatings';
 import EconomicCalendar from './components/EconomicCalendar';
+import Charts from './components/Charts';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -51,6 +52,7 @@ const TABS = [
     // ── Research ──────────────────────────────────────────────
     { id: 'market',       label: 'Market Analysis',     icon: Activity },
     { id: 'compounders',  label: 'Compounders',         icon: Award },
+    { id: 'charts',       label: 'Charts',              icon: BarChart2 },
     // ── Data ──────────────────────────────────────────────────
     { id: 'data',         label: 'Data Ingestion',      icon: Database },
     { id: 'jobs',         label: 'Active Jobs',         icon: Activity },
@@ -65,7 +67,7 @@ const NAV_GROUPS = [
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
     { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
-    { label: 'Research',       ids: ['market', 'compounders'] },
+    { label: 'Research',       ids: ['market', 'compounders', 'charts'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
 
@@ -167,6 +169,7 @@ export default function App() {
                     {activeTab === 'backtest'    && <Backtest />}
                     {activeTab === 'market'      && <MarketAnalysis />}
                     {activeTab === 'compounders' && <Compounders />}
+                    {activeTab === 'charts'      && <Charts />}
                     {activeTab === 'data'        && <IngestionDashboard onNavigate={handleNavigate} />}
                     {activeTab === 'jobs'        && <LiveJobsView />}
                     {activeTab === 'universe'    && <StockUniverse onNavigate={handleNavigate} />}
