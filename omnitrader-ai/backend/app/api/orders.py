@@ -16,7 +16,7 @@ POST /orders/broker/sync       — sync broker positions → portfolio_positions
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,12 @@ def _order_to_dict(order: Order) -> dict:
         "final_score":           order.final_score,
         "notes":                 order.notes,
         "portfolio_position_id": order.portfolio_position_id,
+        "stop_price":            order.stop_price if hasattr(order, 'stop_price') else None,
+        "target_price":          order.target_price if hasattr(order, 'target_price') else None,
+        "trail_amount":          order.trail_amount if hasattr(order, 'trail_amount') else None,
+        "trail_type":            order.trail_type if hasattr(order, 'trail_type') else None,
+        "execution_algo":        order.execution_algo if hasattr(order, 'execution_algo') else None,
+        "bracket_group_id":      order.bracket_group_id if hasattr(order, 'bracket_group_id') else None,
     }
 
 
@@ -342,3 +348,186 @@ async def sync_broker_positions(
         "orders_synced": orders_updated,
         **positions_result,
     }
+
+
+# ─── Bracket order ────────────────────────────────────────────────────────────
+
+@router.post("/bracket/{ticker}")
+async def submit_bracket_order(
+    ticker: str,
+    entry_type: str = Body("MARKET", description="MARKET or LIMIT"),
+    entry_price: Optional[float] = Body(None, description="Required for LIMIT entry"),
+    stop_price: Optional[float] = Body(None, description="Stop loss price (derived from analysis if not set)"),
+    target_price: Optional[float] = Body(None, description="Take profit price (derived from analysis if not set)"),
+    qty: Optional[float] = Body(None, description="Override computed qty"),
+    notes: Optional[str] = Body(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Submit a bracket order: entry + stop loss + take profit as one atomic order.
+
+    If stop_price/target_price not provided, they are derived from the latest
+    AI analysis for the ticker (analysis.stop_loss, analysis.take_profit).
+
+    Bracket orders are supported natively by Alpaca and via workarounds on
+    other brokers (see broker-specific notes).
+    """
+    ticker = ticker.upper()
+    manager = OrderManager(db)
+    result = await manager.submit_bracket_order(
+        ticker=ticker,
+        qty=qty,
+        entry_type=entry_type,
+        entry_price=entry_price,
+        stop_price=stop_price,
+        target_price=target_price,
+        notes=notes,
+    )
+    if result["status"] == "halted":
+        raise HTTPException(status_code=503, detail=result["reason"])
+    return result
+
+
+# ─── Stop order ───────────────────────────────────────────────────────────────
+
+@router.post("/stop/{ticker}")
+async def submit_stop_order(
+    ticker: str,
+    side: str = Body(..., description="BUY or SELL"),
+    qty: float = Body(..., gt=0),
+    stop_price: float = Body(..., description="Stop trigger price"),
+    limit_price: Optional[float] = Body(None, description="If set → stop-limit; if None → stop-market"),
+    notes: Optional[str] = Body(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Place a stop or stop-limit order.
+
+    - Stop-market: triggers at stop_price, fills at market (no limit_price)
+    - Stop-limit: triggers at stop_price, fills at limit_price or better
+
+    Common use cases:
+    - Protective stop: SELL stop below current price to limit downside
+    - Buy-stop: BUY stop above current price to enter breakout
+    """
+    manager = OrderManager(db)
+    result = await manager.submit_stop_order(
+        ticker=ticker.upper(),
+        side=side.upper(),
+        qty=qty,
+        stop_price=stop_price,
+        limit_price=limit_price,
+        notes=notes,
+    )
+    if result.get("status") == "halted":
+        raise HTTPException(status_code=503, detail=result["reason"])
+    return result
+
+
+# ─── Trailing stop order ──────────────────────────────────────────────────────
+
+@router.post("/trailing-stop/{ticker}")
+async def submit_trailing_stop_order(
+    ticker: str,
+    side: str = Body("SELL", description="BUY or SELL (SELL for long exit)"),
+    qty: float = Body(..., gt=0),
+    trail_amount: float = Body(..., gt=0, description="Trail distance"),
+    trail_type: str = Body("ABSOLUTE", description="ABSOLUTE (dollar/rupee) or PERCENTAGE"),
+    notes: Optional[str] = Body(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Place a trailing stop order.
+
+    The stop price automatically adjusts as the market moves in your favor:
+    - ABSOLUTE: trail_amount is a fixed price distance (e.g., $2.50 or ₹50)
+    - PERCENTAGE: trail_amount is a percentage (e.g., 2.0 for 2%)
+
+    Supported natively by Alpaca and IBKR. Other brokers simulate via stop-market.
+    """
+    if trail_type.upper() not in ("ABSOLUTE", "PERCENTAGE"):
+        raise HTTPException(status_code=422, detail="trail_type must be ABSOLUTE or PERCENTAGE")
+    manager = OrderManager(db)
+    result = await manager.submit_trailing_stop_order(
+        ticker=ticker.upper(),
+        side=side.upper(),
+        qty=qty,
+        trail_amount=trail_amount,
+        trail_type=trail_type.upper(),
+        notes=notes,
+    )
+    return result
+
+
+# ─── Execution analysis ───────────────────────────────────────────────────────
+
+@router.get("/execution/analyze")
+async def analyze_execution(
+    ticker: str = Query(...),
+    qty: float = Query(..., gt=0),
+    side: str = Query("BUY"),
+    urgency: str = Query("NORMAL", description="LOW, NORMAL, HIGH"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analyze the optimal execution strategy for an order before placing it.
+
+    Returns recommended strategy (DIRECT/TWAP/VWAP/ICEBERG), estimated slippage,
+    execution plan with time slices, and market impact estimate.
+
+    Use this before placing large orders to minimize market impact.
+    """
+    try:
+        from app.engines.smart_execution import SmartExecutionEngine
+        engine = SmartExecutionEngine(db)
+        plan = await engine.analyze_order(ticker.upper(), side.upper(), qty, urgency.upper())
+        return {
+            "ticker": plan.ticker,
+            "side": plan.side,
+            "total_qty": plan.total_qty,
+            "strategy": plan.strategy,
+            "estimated_slippage_bps": plan.estimated_slippage_bps,
+            "estimated_market_impact_bps": plan.estimated_market_impact_bps,
+            "adv_usd": plan.adv_usd,
+            "duration_minutes": plan.duration_minutes,
+            "reasoning": plan.reasoning,
+            "n_slices": len(plan.slices),
+            "slices": [
+                {
+                    "slice_index": s.slice_index,
+                    "qty": round(s.qty, 4),
+                    "delay_seconds": s.delay_seconds,
+                    "order_type": s.order_type,
+                    "limit_price_offset_pct": s.limit_price_offset_pct,
+                }
+                for s in plan.slices
+            ],
+        }
+    except Exception as e:
+        logger.error("Execution analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Execution quality report ─────────────────────────────────────────────────
+
+@router.get("/execution/quality")
+async def execution_quality_report(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Historical execution quality report.
+
+    Analyzes past filled orders to measure:
+    - Average slippage vs reference price at order submission
+    - Fill time distribution
+    - Quality breakdown by broker
+    """
+    try:
+        from app.engines.smart_execution import SmartExecutionEngine
+        engine = SmartExecutionEngine(db)
+        report = await engine.get_execution_quality_report(days=days)
+        return report
+    except Exception as e:
+        logger.error("Execution quality report failed: %s", e)
+        return {"error": str(e), "total_orders": 0}

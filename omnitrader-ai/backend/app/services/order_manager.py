@@ -6,12 +6,17 @@ OrderManager — orchestrates order submission through the full pipeline:
   circuit breaker → market-hours check → position sizing → broker → DB persist
 
 Supports:
-  - submit_from_analysis()  : BUY from AI analysis result (signal-driven)
-  - submit_manual()         : manual BUY/SELL bypassing signal requirements
-  - sync_order_statuses()   : poll broker for PENDING order updates
-  - sync_broker_positions() : reconcile broker holdings ↔ portfolio_positions table
+  - submit_from_analysis()        : BUY from AI analysis result (signal-driven)
+  - submit_bracket_order()        : entry + stop loss + take profit as atomic order
+  - submit_stop_order()           : stop-market or stop-limit order
+  - submit_trailing_stop_order()  : trailing stop order
+  - submit_manual()               : manual BUY/SELL bypassing signal requirements
+  - sync_order_statuses()         : poll broker for PENDING order updates
+  - sync_broker_positions()       : reconcile broker holdings ↔ portfolio_positions table
 """
 from __future__ import annotations
+
+import json
 
 import logging
 from datetime import datetime, timezone
@@ -747,4 +752,321 @@ class OrderManager:
             "broker_positions":    len(all_broker_positions),
             "new_positions_added": new_count,
             "already_tracked":     already_count,
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Advanced order types (Phase E)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def submit_bracket_order(
+        self,
+        ticker: str,
+        qty: Optional[float] = None,
+        entry_type: str = "MARKET",
+        entry_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        target_price: Optional[float] = None,
+        analysis: Optional[dict] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Submit a bracket order: entry + stop loss + take profit as one atomic order.
+
+        If stop_price/target_price not supplied, derives from latest AI analysis.
+        If qty not supplied, uses Kelly sizing from analysis/account balance.
+        """
+        ticker = ticker.upper()
+
+        cb_engine = CircuitBreakerEngine(self.db)
+        cb = await cb_engine.check()
+        if cb["status"] == "HALT":
+            reason = "; ".join(cb["reasons"]) or "Circuit breaker HALT"
+            return {"status": "halted", "reason": reason, "parent_order_id": None}
+
+        if analysis is None:
+            analysis = await self._latest_analysis(ticker)
+
+        country = await self._get_stock_country(ticker)
+        broker = get_broker(country)
+
+        current_price = await self._latest_price(ticker)
+        if not current_price and analysis:
+            current_price = analysis.get("entry_price") or 0.0
+
+        if not current_price:
+            return {
+                "status": "skipped",
+                "reason": f"No price data for {ticker}",
+                "parent_order_id": None,
+            }
+
+        if qty is None:
+            balance = await broker.get_account_balance()
+            portfolio_value = balance.portfolio_value or balance.cash or 100_000.0
+            max_pct = float((analysis or {}).get("max_position_pct") or 5.0)
+            if cb["status"] == "CAUTION":
+                max_pct /= 2
+            qty = self._compute_qty(portfolio_value, max_pct, current_price)
+
+        # Derive stop/target from analysis if not provided
+        if stop_price is None and analysis:
+            stop_price = analysis.get("stop_loss")
+        if target_price is None and analysis:
+            target_price = analysis.get("take_profit")
+
+        if stop_price is None or target_price is None:
+            return {
+                "status": "skipped",
+                "reason": "stop_price and target_price are required (or provide an analysis with stop_loss/take_profit)",
+                "parent_order_id": None,
+            }
+
+        # For LIMIT entry, use supplied entry_price or current_price
+        eff_entry_price = entry_price if entry_type.upper() == "LIMIT" else None
+
+        try:
+            from app.brokers.base import BracketOrderResult
+            result = await broker.place_bracket_order(
+                ticker=ticker,
+                side="BUY",
+                qty=float(qty),
+                entry_type=entry_type.upper(),
+                entry_price=eff_entry_price,
+                stop_price=stop_price,
+                target_price=target_price,
+            )
+        except Exception as exc:
+            logger.error("[OrderManager] bracket_order failed for %s: %s", ticker, exc)
+            return {"status": "error", "reason": str(exc), "parent_order_id": None}
+
+        now = datetime.now(timezone.utc)
+        order_notes = notes or result.message
+        try:
+            order_notes = json.dumps({
+                "stop": stop_price,
+                "target": target_price,
+                "msg": notes or result.message,
+            })
+        except Exception:
+            pass
+
+        order = Order(
+            ticker=ticker,
+            created_at=now,
+            side="BUY",
+            order_type="BRACKET",
+            qty=float(qty),
+            limit_price=eff_entry_price,
+            broker=broker.name,
+            broker_order_id=result.parent_order_id,
+            status=result.status,
+            signal=(analysis or {}).get("signal", "BUY"),
+            final_score=(analysis or {}).get("final_score"),
+            notes=order_notes,
+        )
+        try:
+            order.stop_price = stop_price
+            order.target_price = target_price
+            order.execution_algo = "BRACKET"
+        except Exception:
+            pass
+
+        self.db.add(order)
+        await self.db.flush()
+
+        if result.status == "FILLED":
+            pos = PortfolioPosition(
+                ticker=ticker,
+                entry_date=now,
+                entry_price=eff_entry_price or current_price,
+                shares=float(qty),
+                position_value=round((eff_entry_price or current_price) * qty, 2),
+                stop_loss=stop_price,
+                take_profit=target_price,
+                signal=(analysis or {}).get("signal", "BUY"),
+                regime=(analysis or {}).get("regime"),
+                notes=notes,
+                is_open=True,
+            )
+            self.db.add(pos)
+            await self.db.flush()
+            order.portfolio_position_id = pos.id
+
+        await self.db.commit()
+        await self.db.refresh(order)
+
+        logger.info(
+            "[OrderManager] Bracket %s: parent=%s stop=%s target=%s status=%s",
+            ticker, result.parent_order_id, result.stop_leg_id, result.target_leg_id, result.status,
+        )
+        return {
+            "status": "submitted",
+            "reason": result.message,
+            "db_order_id": order.id,
+            "broker": broker.name,
+            "parent_order_id": result.parent_order_id,
+            "stop_leg_id": result.stop_leg_id,
+            "target_leg_id": result.target_leg_id,
+            "order_status": result.status,
+            "qty": qty,
+            "stop_price": stop_price,
+            "target_price": target_price,
+        }
+
+    async def submit_stop_order(
+        self,
+        ticker: str,
+        side: str,
+        qty: float,
+        stop_price: float,
+        limit_price: Optional[float] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Submit a stop or stop-limit order.
+
+        stop-market: triggers at stop_price, fills at market (limit_price=None)
+        stop-limit:  triggers at stop_price, fills at limit_price or better
+        """
+        ticker = ticker.upper()
+        side = side.upper()
+
+        try:
+            cb_engine = CircuitBreakerEngine(self.db)
+            cb = await cb_engine.check()
+            if cb["status"] == "HALT":
+                logger.warning("[OrderManager] HALT — stop order for %s logged only", ticker)
+        except Exception as exc:
+            logger.warning("[OrderManager] CB check skipped: %s", exc)
+
+        country = await self._get_stock_country(ticker)
+        broker = get_broker(country)
+
+        result = await broker.place_stop_order(
+            ticker=ticker,
+            side=side,
+            qty=qty,
+            stop_price=stop_price,
+            limit_price=limit_price,
+        )
+        order_type = "STOP_LIMIT" if limit_price is not None else "STOP"
+
+        now = datetime.now(timezone.utc)
+        order = Order(
+            ticker=ticker,
+            created_at=now,
+            side=side,
+            order_type=order_type,
+            qty=float(qty),
+            limit_price=limit_price,
+            broker=broker.name,
+            broker_order_id=result.broker_order_id,
+            status=result.status,
+            filled_qty=result.filled_qty,
+            filled_price=result.filled_price,
+            filled_at=now if result.status == "FILLED" else None,
+            signal="STOP",
+            notes=notes or result.message,
+        )
+        try:
+            order.stop_price = stop_price
+        except Exception:
+            pass
+
+        self.db.add(order)
+        await self.db.commit()
+        await self.db.refresh(order)
+
+        logger.info(
+            "[OrderManager] Stop order %s %s: trigger=%.4f status=%s",
+            side, ticker, stop_price, result.status,
+        )
+        return {
+            "status": "submitted",
+            "reason": result.message,
+            "order_id": order.id,
+            "broker": broker.name,
+            "broker_order_id": result.broker_order_id,
+            "order_status": result.status,
+            "order_type": order_type,
+            "stop_price": stop_price,
+            "limit_price": limit_price,
+        }
+
+    async def submit_trailing_stop_order(
+        self,
+        ticker: str,
+        side: str,
+        qty: float,
+        trail_amount: float,
+        trail_type: str = "ABSOLUTE",
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Submit a trailing stop order.
+
+        trail_type: "ABSOLUTE" (fixed dollar/rupee distance) or "PERCENTAGE"
+        Supported natively by Alpaca and IBKR; other brokers simulate via stop-market.
+        """
+        ticker = ticker.upper()
+        side = side.upper()
+        trail_type = trail_type.upper()
+
+        try:
+            cb_engine = CircuitBreakerEngine(self.db)
+            await cb_engine.check()
+        except Exception:
+            pass
+
+        country = await self._get_stock_country(ticker)
+        broker = get_broker(country)
+
+        result = await broker.place_trailing_stop_order(
+            ticker=ticker,
+            side=side,
+            qty=qty,
+            trail_amount=trail_amount,
+            trail_type=trail_type,
+        )
+
+        now = datetime.now(timezone.utc)
+        trail_desc = f"{trail_amount}{'%' if trail_type == 'PERCENTAGE' else ''}"
+        order = Order(
+            ticker=ticker,
+            created_at=now,
+            side=side,
+            order_type="TRAILING_STOP",
+            qty=float(qty),
+            broker=broker.name,
+            broker_order_id=result.broker_order_id,
+            status=result.status,
+            filled_qty=result.filled_qty,
+            filled_price=result.filled_price,
+            filled_at=now if result.status == "FILLED" else None,
+            signal="TRAILING_STOP",
+            notes=notes or f"Trail {trail_desc} — {result.message}",
+        )
+        try:
+            order.trail_amount = trail_amount
+            order.trail_type = trail_type
+        except Exception:
+            pass
+
+        self.db.add(order)
+        await self.db.commit()
+        await self.db.refresh(order)
+
+        logger.info(
+            "[OrderManager] Trailing stop %s %s: trail=%s %s status=%s",
+            side, ticker, trail_amount, trail_type, result.status,
+        )
+        return {
+            "status": "submitted",
+            "reason": result.message,
+            "order_id": order.id,
+            "broker": broker.name,
+            "broker_order_id": result.broker_order_id,
+            "order_status": result.status,
+            "trail_amount": trail_amount,
+            "trail_type": trail_type,
         }

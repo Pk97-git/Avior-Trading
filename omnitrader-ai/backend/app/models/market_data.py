@@ -299,6 +299,13 @@ class Order(Base):
     order_type      = Column(String)          # MARKET / LIMIT
     qty             = Column(Float)           # shares / units requested
     limit_price     = Column(Float)           # None for MARKET orders
+    stop_price      = Column(Float, nullable=True)          # stop trigger price (for STOP/STOP_LIMIT/BRACKET)
+    target_price    = Column(Float, nullable=True)          # take profit price (for BRACKET orders)
+    trail_amount    = Column(Float, nullable=True)          # trailing distance (for TRAILING_STOP)
+    trail_type      = Column(String(20), nullable=True)     # ABSOLUTE or PERCENTAGE
+    bracket_group_id = Column(String(100), nullable=True)  # links bracket order legs
+    execution_algo  = Column(String(20), nullable=True)     # DIRECT/TWAP/VWAP/ICEBERG
+    parent_order_id = Column(Integer, nullable=True)        # FK to parent Order for bracket legs
     broker          = Column(String)          # PAPER / ZERODHA / ALPACA
     broker_order_id = Column(String)          # ID returned by the broker
     status          = Column(String, default="PENDING")  # PENDING / FILLED / CANCELLED / REJECTED

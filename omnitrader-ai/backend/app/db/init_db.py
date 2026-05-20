@@ -27,6 +27,14 @@ _MIGRATIONS = [
     "ALTER TABLE ai_analysis ADD COLUMN IF NOT EXISTS atr_14 FLOAT",
     # Order table: portfolio_position_id added after initial orders schema
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS portfolio_position_id INTEGER",
+    # Order table: Phase E advanced order type columns
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_price FLOAT",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS target_price FLOAT",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS trail_amount FLOAT",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS trail_type VARCHAR(20)",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS bracket_group_id VARCHAR(100)",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS execution_algo VARCHAR(20)",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS parent_order_id INTEGER",
     # Insider transactions and analyst ratings new columns
     "ALTER TABLE insider_transactions ADD COLUMN IF NOT EXISTS form_type VARCHAR",
     "ALTER TABLE analyst_ratings ADD COLUMN IF NOT EXISTS price_target FLOAT",

@@ -16,7 +16,13 @@ from typing import Optional
 
 import httpx
 
-from app.brokers.base import BrokerInterface, OrderResult, Position, AccountBalance
+from app.brokers.base import (
+    BrokerInterface,
+    OrderResult,
+    BracketOrderResult,
+    Position,
+    AccountBalance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,214 @@ class ZerodhaKiteBroker(BrokerInterface):
         except Exception as exc:
             logger.error("[Zerodha] place_order failed: %s", exc)
             return OrderResult(broker_order_id="", status="REJECTED", message=str(exc))
+
+    async def place_stop_order(
+        self,
+        ticker: str,
+        side: str,
+        qty: float,
+        stop_price: float,
+        limit_price: Optional[float] = None,
+    ) -> OrderResult:
+        """
+        Place a stop order on Kite.
+        - limit_price is None  → SL-M (stop-market)
+        - limit_price is set   → SL   (stop-limit)
+        """
+        exchange, symbol = self._kite_exchange(ticker)
+        transaction_type = "BUY" if side.upper() == "BUY" else "SELL"
+
+        if limit_price is None:
+            kite_order_type = "SL-M"
+        else:
+            kite_order_type = "SL"
+
+        payload: dict = {
+            "exchange":         exchange,
+            "tradingsymbol":    symbol,
+            "transaction_type": transaction_type,
+            "quantity":         int(qty),
+            "product":          "CNC",
+            "order_type":       kite_order_type,
+            "validity":         "DAY",
+            "trigger_price":    stop_price,
+        }
+        if limit_price is not None:
+            payload["price"] = limit_price
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/orders/regular",
+                    headers=self._headers(),
+                    data=payload,
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get("status") == "success":
+                    return OrderResult(
+                        broker_order_id=str(data["data"]["order_id"]),
+                        status="PENDING",
+                        message=f"Stop order placed on Kite ({kite_order_type})",
+                    )
+                return OrderResult(
+                    broker_order_id="",
+                    status="REJECTED",
+                    message=data.get("message", resp.text),
+                )
+        except Exception as exc:
+            logger.error("[Zerodha] place_stop_order failed: %s", exc)
+            return OrderResult(broker_order_id="", status="REJECTED", message=str(exc))
+
+    async def place_trailing_stop_order(
+        self,
+        ticker: str,
+        side: str,
+        qty: float,
+        trail_amount: float,
+        trail_type: str = "ABSOLUTE",
+    ) -> OrderResult:
+        """
+        Place a trailing stop via Zerodha Bracket Order (BO variety).
+        Kite trailing stops are only supported within bracket orders.
+        trailing_stoploss field is expressed in price points (rupees).
+        """
+        exchange, symbol = self._kite_exchange(ticker)
+        transaction_type = "BUY" if side.upper() == "BUY" else "SELL"
+
+        # For a pure trailing stop we need an entry reference price.
+        # We place a MARKET bracket order; squareoff=0 means no fixed target.
+        # trail_type PERCENTAGE: trailing_stoploss = price * trail_amount / 100
+        # trail_type ABSOLUTE:   trailing_stoploss = trail_amount (in points)
+        if trail_type.upper() == "PERCENTAGE":
+            # Without a live price feed here, we set trailing_stoploss proportionally.
+            # Callers should provide trail_amount as a percent (e.g. 1.0 for 1%).
+            # We use trail_amount directly and note manual adjustment may be needed.
+            trailing_stoploss = trail_amount
+            note = (
+                f"Trailing stop placed as BO (PERCENTAGE mode: {trail_amount}% "
+                "expressed as points — verify with live price)"
+            )
+        else:
+            trailing_stoploss = trail_amount
+            note = f"Trailing stop placed as BO (ABSOLUTE: {trail_amount} pts)"
+
+        payload: dict = {
+            "exchange":           exchange,
+            "tradingsymbol":      symbol,
+            "transaction_type":   transaction_type,
+            "quantity":           int(qty),
+            "product":            "MIS",          # BO is intraday only on Kite
+            "order_type":         "MARKET",
+            "validity":           "DAY",
+            "squareoff":          0,               # no fixed profit target
+            "stoploss":           trailing_stoploss,
+            "trailing_stoploss":  trailing_stoploss,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/orders/bo",
+                    headers=self._headers(),
+                    data=payload,
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get("status") == "success":
+                    return OrderResult(
+                        broker_order_id=str(data["data"]["order_id"]),
+                        status="PENDING",
+                        message=note,
+                    )
+                return OrderResult(
+                    broker_order_id="",
+                    status="REJECTED",
+                    message=data.get("message", resp.text),
+                )
+        except Exception as exc:
+            logger.error("[Zerodha] place_trailing_stop_order failed: %s", exc)
+            return OrderResult(broker_order_id="", status="REJECTED", message=str(exc))
+
+    async def place_bracket_order(
+        self,
+        ticker: str,
+        side: str,
+        qty: float,
+        entry_type: str,
+        entry_price: Optional[float],
+        stop_price: float,
+        target_price: float,
+    ) -> BracketOrderResult:
+        """
+        Place a Bracket Order (BO) on Kite Connect.
+        squareoff and stoploss are in price points (not absolute prices).
+        """
+        exchange, symbol = self._kite_exchange(ticker)
+        transaction_type = "BUY" if side.upper() == "BUY" else "SELL"
+        kite_order_type = "LIMIT" if entry_type.upper() == "LIMIT" else "MARKET"
+
+        # Derive reference entry price for point calculations.
+        ref_price = entry_price if entry_price is not None else 0.0
+
+        if side.upper() == "BUY":
+            squareoff = target_price - ref_price   # points above entry
+            stoploss = ref_price - stop_price       # points below entry
+        else:  # SELL
+            squareoff = ref_price - target_price    # points below entry for short
+            stoploss = stop_price - ref_price       # points above entry for short
+
+        # Clamp to non-negative — guard against inverted inputs
+        squareoff = max(squareoff, 0.0)
+        stoploss = max(stoploss, 0.0)
+
+        payload: dict = {
+            "exchange":         exchange,
+            "tradingsymbol":    symbol,
+            "transaction_type": transaction_type,
+            "quantity":         int(qty),
+            "product":          "MIS",     # Kite BO is always intraday (MIS)
+            "order_type":       kite_order_type,
+            "validity":         "DAY",
+            "squareoff":        squareoff,
+            "stoploss":         stoploss,
+            "trailing_stoploss": 0,        # no trailing in plain bracket
+        }
+        if kite_order_type == "LIMIT" and entry_price is not None:
+            payload["price"] = entry_price
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/orders/bo",
+                    headers=self._headers(),
+                    data=payload,
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get("status") == "success":
+                    order_id = str(data["data"]["order_id"])
+                    return BracketOrderResult(
+                        parent_order_id=order_id,
+                        # Kite bundles stop & target legs under the same parent
+                        stop_leg_id=order_id,
+                        target_leg_id=order_id,
+                        status="PENDING",
+                        message="Bracket order placed on Kite (BO variety)",
+                    )
+                return BracketOrderResult(
+                    parent_order_id="",
+                    stop_leg_id="",
+                    target_leg_id="",
+                    status="REJECTED",
+                    message=data.get("message", resp.text),
+                )
+        except Exception as exc:
+            logger.error("[Zerodha] place_bracket_order failed: %s", exc)
+            return BracketOrderResult(
+                parent_order_id="",
+                stop_leg_id="",
+                target_leg_id="",
+                status="REJECTED",
+                message=str(exc),
+            )
 
     async def get_order_status(self, broker_order_id: str) -> OrderResult:
         try:
