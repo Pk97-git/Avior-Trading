@@ -40,7 +40,7 @@ async def get_signals(
 ):
     """
     Paginated feed of signal-change alerts, newest first.
-    Filter by signal type (STRONG_BUY, ACCUMULATE, AVOID, DISTRIBUTION) and country.
+    Filter by signal type (BUY, HOLD, REDUCE, SELL) and country.
     """
     stmt = (
         select(Alert, Stock.name, Stock.sector, Stock.country)
@@ -115,7 +115,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
       • Today's signal counts by type
       • Current macro regime
       • Average final score across all tickers analysed today
-      • Top 6 STRONG_BUY / ACCUMULATE signals from latest analysis
+      • Top 6 BUY / HOLD signals from latest analysis
       • Recent 20 alerts
     """
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)

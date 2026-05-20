@@ -58,6 +58,18 @@ try:
 except ImportError:
     _NEWS_AGENT_AVAILABLE = False
 
+try:
+    from app.agents.market import MarketAgent
+    _MARKET_AGENT_AVAILABLE = True
+except ImportError:
+    _MARKET_AGENT_AVAILABLE = False
+
+try:
+    from app.agents.execution_agent import ExecutionAgent
+    _EXECUTION_AGENT_AVAILABLE = True
+except ImportError:
+    _EXECUTION_AGENT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 ALERT_COOLDOWN_HOURS  = 4
@@ -219,6 +231,13 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     except Exception as e:
         macro_result = e
 
+    market_result = {"score": 50, "thesis": [], "market_regime": "Unknown"}
+    if _MARKET_AGENT_AVAILABLE:
+        try:
+            market_result = await MarketAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("MarketAgent failed for %s: %s", ticker, e)
+
     try:
         inst_result = await InstitutionalAgent(db, ticker).analyze()
     except Exception as e:
@@ -273,6 +292,12 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     sent_result   = _safe(sent_result,   name="Sentiment")
     mem_result    = _safe(mem_result,    name="Memory")
     vision_result = _safe(vision_result, name="Vision")
+
+    # Blend market conditions into macro score (market internals refine economic view)
+    if market_result.get("thesis"):
+        m_delta = market_result["score"] - 50
+        macro_result["score"] = max(0, min(100, macro_result["score"] + round(m_delta * 0.20)))
+        macro_result.setdefault("thesis", []).extend(market_result["thesis"])
 
     # Blend breaking news (48h) into sentiment score — news velocity matters
     if news_result.get("thesis"):
@@ -350,6 +375,15 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         weight_nudge         = weight_nudge or None,
     )
 
+    exec_agent_result = {"score": 50, "thesis": [], "should_execute": True, "execution_notes": ""}
+    if _EXECUTION_AGENT_AVAILABLE:
+        try:
+            exec_agent_result = await ExecutionAgent(db, ticker).analyze(
+                final_score=exec_result["final_score"]
+            )
+        except Exception as e:
+            logger.debug("ExecutionAgent failed for %s: %s", ticker, e)
+
     # ── Phase 3: Risk sizing pipeline ───────────────────────────────────────
     calibrator = CalibrationEngine(db)
     await calibrator.fit()
@@ -412,6 +446,12 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "risk_thesis":             risk_result.get("thesis", []),
         # Breaking news
         "breaking_news":           news_result.get("breaking_event"),
+        # Market internals (MarketAgent)
+        "market_regime":           market_result.get("market_regime", "Unknown"),
+        "market_score":            market_result.get("score", 50),
+        # Execution gate (ExecutionAgent)
+        "should_execute":          exec_agent_result.get("should_execute", True),
+        "execution_notes":         exec_agent_result.get("execution_notes", ""),
     }
 
     # ── Persist ──────────────────────────────────────────────────────────────
