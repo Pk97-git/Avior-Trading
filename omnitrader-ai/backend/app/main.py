@@ -48,6 +48,7 @@ from app.api import goals as goals_router
 from app.api import tax as tax_router
 from app.api import rebalance as rebalance_router
 from app.api import copilot as copilot_router
+from app.api import alerts_automation as alerts_automation_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -183,6 +184,33 @@ async def run_trailing_stops():
                    len(result.get("updated", [])), len(exits))
 
 
+async def run_smart_alerts():
+    """Run smart alert engine — check all active AlertRules."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.engines.smart_alerts import SmartAlertEngine
+        async with AsyncSessionLocal() as db:
+            engine = SmartAlertEngine(db)
+            result = await engine.run_all_checks()
+            logger.info("[SmartAlerts] Checked %d rules, fired %d alerts",
+                       result.get("checked", 0), result.get("fired", 0))
+    except Exception as exc:
+        logger.warning("[SmartAlerts] run failed: %s", exc)
+
+
+async def run_automation_rules():
+    """Run automation engine — execute due AutomationRules."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.engines.automation import AutomationEngine
+        async with AsyncSessionLocal() as db:
+            engine = AutomationEngine(db)
+            result = await engine.run_all_rules()
+            logger.info("[Automation] Executed %d rules", result.get("executed", 0))
+    except Exception as exc:
+        logger.warning("[Automation] run failed: %s", exc)
+
+
 async def check_and_run_initial_load():
     """
     On boot: if stock_prices has fewer than 100 rows, trigger the full
@@ -310,6 +338,14 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_trailing_stops, CronTrigger(minute=0, day_of_week="mon-fri"),
                       id="trailing_stops", replace_existing=True)
 
+    # ── Smart alerts: every 15 min on weekdays ─────────────────────────────────
+    scheduler.add_job(run_smart_alerts,    CronTrigger(minute="*/15", day_of_week="mon-fri"),
+                      id="smart_alerts",   replace_existing=True)
+
+    # ── Automation rules: every 30 min ─────────────────────────────────────────
+    scheduler.add_job(run_automation_rules, CronTrigger(minute="*/30"),
+                      id="automation_rules", replace_existing=True)
+
     scheduler.start()
     logger.info(
         "[Scheduler] Jobs registered:\n"
@@ -327,7 +363,9 @@ async def lifespan(app: FastAPI):
         "  Weekly refresh:   Sun 02:00 UTC\n"
         "  Walk-forward:     Sun 03:00 UTC\n"
         "  Monthly 13F:      1st of month 03:00 UTC\n"
-        "  Trailing stops:   hourly weekdays"
+        "  Trailing stops:   hourly weekdays\n"
+        "  Smart alerts:    every 15 min (weekdays)\n"
+        "  Automation:      every 30 min\n"
     )
 
     asyncio.create_task(check_and_run_initial_load())
@@ -370,6 +408,7 @@ app.include_router(goals_router.router)
 app.include_router(tax_router.router)        # prefix already set in router (/api/v1/tax)
 app.include_router(rebalance_router.router)  # prefix already set in router (/api/v1/rebalance)
 app.include_router(copilot_router.router,      prefix="/api/v1/copilot",      tags=["copilot"])
+app.include_router(alerts_automation_router.router, prefix="/api/v1/automation", tags=["automation"])
 
 import os
 from fastapi.staticfiles import StaticFiles

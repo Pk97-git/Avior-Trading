@@ -4,7 +4,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
 from app.db.base import Base
 import datetime
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timezone
 
 
 
@@ -256,6 +256,45 @@ class Watchlist(Base):
     __table_args__ = (
         Index("ix_watchlist_ticker_active", "ticker", "is_active"),
     )
+
+
+class AlertRule(Base):
+    """
+    User-defined smart alert rule.
+    The SmartAlertEngine checks these every 15 minutes and fires
+    notifications when conditions are met.
+    """
+    __tablename__ = "alert_rules"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    name          = Column(String(200), nullable=False)
+    ticker        = Column(String(20), nullable=True)       # None = market-wide
+    alert_type    = Column(String(50), nullable=False)      # EARNINGS_APPROACHING | INSIDER_SPIKE | RSI_OVERBOUGHT | RSI_OVERSOLD | SENTIMENT_SHIFT | OPTIONS_ACTIVITY | PRICE_TARGET | SCORE_CHANGE
+    condition     = Column(JSONB, nullable=True)            # {"threshold": 70, "days_ahead": 7}
+    notify_via    = Column(JSONB, nullable=True)            # ["email", "slack"]
+    is_active     = Column(Boolean, default=True)
+    created_at    = Column(DateTime(timezone=True), default=lambda: _dt.now(timezone.utc))
+    last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    trigger_count = Column(Integer, default=0)
+
+
+class AutomationRule(Base):
+    """
+    User-defined automation rule executed on schedule.
+    Types: AUTO_REBALANCE, AUTO_SIP, AUTO_STOP_LOSS, AUTO_HEDGE
+    """
+    __tablename__ = "automation_rules"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    name         = Column(String(200), nullable=False)
+    rule_type    = Column(String(50), nullable=False)       # AUTO_REBALANCE | AUTO_SIP | AUTO_STOP_LOSS | AUTO_HEDGE
+    config       = Column(JSONB, nullable=True)             # rule-specific params
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime(timezone=True), default=lambda: _dt.now(timezone.utc))
+    last_run_at  = Column(DateTime(timezone=True), nullable=True)
+    next_run_at  = Column(DateTime(timezone=True), nullable=True)
+    run_count    = Column(Integer, default=0)
+    last_result  = Column(JSONB, nullable=True)             # summary of last execution
 
 
 class PortfolioPosition(Base):

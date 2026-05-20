@@ -9,7 +9,7 @@ from app.models.market_data import (
     ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
     InsiderTransaction, AnalystRating, StockTechnicals,
     ValuationMetrics, CandlestickPattern, EarningsTranscript, PairTrade,
-    InvestmentGoal,
+    InvestmentGoal, AlertRule, AutomationRule,
 )
 
 # New columns added to existing tables — applied as safe ALTER TABLE migrations
@@ -107,6 +107,36 @@ _MIGRATIONS = [
     # Pair trades
     "CREATE TABLE IF NOT EXISTS pair_trades (id SERIAL PRIMARY KEY, symbol_a VARCHAR NOT NULL, symbol_b VARCHAR NOT NULL, sector VARCHAR, cointegration_pvalue FLOAT, correlation_90d FLOAT, spread_mean FLOAT, spread_std FLOAT, spread_zscore FLOAT, hedge_ratio FLOAT, signal VARCHAR, signal_strength VARCHAR, last_updated TIMESTAMPTZ, CONSTRAINT uq_pair_trade UNIQUE (symbol_a, symbol_b))",
     "CREATE INDEX IF NOT EXISTS ix_pair_trade_signal ON pair_trades (signal)",
+    # Phase G: smart alert rules
+    """
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    ticker VARCHAR(20),
+    alert_type VARCHAR(50) NOT NULL,
+    condition JSONB,
+    notify_via JSONB,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_triggered_at TIMESTAMPTZ,
+    trigger_count INTEGER DEFAULT 0
+)
+""",
+    # Phase G: automation rules
+    """
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    config JSONB,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_run_at TIMESTAMPTZ,
+    next_run_at TIMESTAMPTZ,
+    run_count INTEGER DEFAULT 0,
+    last_result JSONB
+)
+""",
     # Investment goals
     """
 CREATE TABLE IF NOT EXISTS investment_goals (
