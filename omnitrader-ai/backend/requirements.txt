@@ -27,3 +27,6 @@ mplfinance>=0.12.10b0
 pytrends>=4.9.2
 statsmodels>=0.14.0
 pyotp>=2.9.0
+xgboost>=2.0.0
+lightgbm>=4.0.0
+torch>=2.0.0
