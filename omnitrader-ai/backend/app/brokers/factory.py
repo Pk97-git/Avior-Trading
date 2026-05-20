@@ -6,13 +6,13 @@ variables and the target country/market.
 
 Resolution order
 ----------------
-India (IN):   ZerodhaKiteBroker → UpstoxBroker → Angel One → PaperBroker
-US (default): AlpacaBroker      → IBKRBroker   → RobinhoodBroker → PaperBroker
+India (IN):   ZerodhaKiteBroker → INDmoneyBroker → UpstoxBroker → Angel One → PaperBroker
+US (default): AlpacaBroker      → IBKRBroker      → RobinhoodBroker → PaperBroker
 
 Priority override
 -----------------
 Set PREFERRED_BROKER to one of:
-    ZERODHA | UPSTOX | ANGEL | ALPACA | IBKR | ROBINHOOD | PAPER
+    ZERODHA | INDMONEY | UPSTOX | ANGEL | ALPACA | IBKR | ROBINHOOD | PAPER
 When set, the factory skips priority scanning and tries that broker directly,
 still falling back to PaperBroker on failure.
 
@@ -39,6 +39,13 @@ def _try_zerodha() -> BrokerInterface:
         raise EnvironmentError("ZERODHA_API_KEY / ZERODHA_ACCESS_TOKEN not set")
     from app.brokers.zerodha import ZerodhaKiteBroker
     return ZerodhaKiteBroker()
+
+
+def _try_indmoney() -> BrokerInterface:
+    if not (os.getenv("INDMONEY_API_KEY") and os.getenv("INDMONEY_ACCESS_TOKEN")):
+        raise EnvironmentError("INDMONEY_API_KEY / INDMONEY_ACCESS_TOKEN not set")
+    from app.brokers.indmoney import INDmoneyBroker
+    return INDmoneyBroker()
 
 
 def _try_upstox() -> BrokerInterface:
@@ -96,6 +103,7 @@ def _try_robinhood() -> BrokerInterface:
 
 _IN_CHAIN = [
     ("ZerodhaKiteBroker", _try_zerodha),
+    ("INDmoneyBroker",    _try_indmoney),
     ("UpstoxBroker",      _try_upstox),
     ("AngelOneBroker",    _try_angel),
 ]
@@ -109,6 +117,7 @@ _US_CHAIN = [
 # Map PREFERRED_BROKER value → constructor
 _BROKER_MAP: dict[str, tuple[str, callable]] = {
     "ZERODHA":   ("ZerodhaKiteBroker", _try_zerodha),
+    "INDMONEY":  ("INDmoneyBroker",    _try_indmoney),
     "UPSTOX":    ("UpstoxBroker",      _try_upstox),
     "ANGEL":     ("AngelOneBroker",    _try_angel),
     "ALPACA":    ("AlpacaBroker",      _try_alpaca),
