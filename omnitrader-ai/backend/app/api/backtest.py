@@ -19,6 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.engines.backtest import BacktestEngine
+from app.engines.strategy_backtest import (
+    StrategyBacktestEngine,
+    ALL_STRATEGIES,
+    STRATEGY_DESCRIPTIONS,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -39,6 +44,27 @@ class BacktestRequest(BaseModel):
     max_hold_days:  int                 = Field(30, ge=1, le=365, description="Force-exit after N days")
     use_kelly:      bool                = Field(True, description="Use half-Kelly sizing when available")
     country:        Optional[str]       = Field(None, description="Filter by country: US or IN")
+
+
+class StrategyBacktestRequest(BaseModel):
+    strategy:         str              = Field(..., description=f"Strategy name. One of: {ALL_STRATEGIES}")
+    tickers:          List[str]        = Field(..., min_items=1, description="List of ticker symbols to trade")
+    start_date:       date             = Field(..., description="Backtest start date (YYYY-MM-DD)")
+    end_date:         date             = Field(..., description="Backtest end date (YYYY-MM-DD)")
+    initial_capital:  float            = Field(100_000.0, ge=1_000)
+    country:          str              = Field("IN", description="IN or US — determines transaction cost model and benchmark")
+    max_positions:    int              = Field(5, ge=1, le=20)
+    stop_loss_pct:    float            = Field(5.0, ge=0, le=50, description="Fixed stop-loss % below entry. 0 = disabled.")
+    take_profit_pct:  float            = Field(15.0, ge=0, le=200, description="Fixed take-profit % above entry. 0 = disabled.")
+    apply_slippage:   bool             = Field(True, description="Apply realistic slippage model")
+    apply_costs:      bool             = Field(True, description="Apply transaction costs (brokerage, STT, etc.)")
+
+
+class CompareRequest(BaseModel):
+    result_a: dict = Field(..., description="First backtest result (from /strategy or /run)")
+    result_b: dict = Field(..., description="Second backtest result to compare against")
+    label_a:  str  = Field("Strategy A", description="Label for first result")
+    label_b:  str  = Field("Strategy B", description="Label for second result")
 
 
 # ── POST /backtest/run ─────────────────────────────────────────────────────────
