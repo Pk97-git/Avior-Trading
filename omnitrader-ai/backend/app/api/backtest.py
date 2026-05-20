@@ -318,3 +318,204 @@ async def quick_stats(
             f"Long signals average implied return: {avg_long_return:+.2f}%."
         ),
     }
+
+
+# ── GET /backtest/strategies ───────────────────────────────────────────────────
+
+
+@router.get("/strategies")
+async def list_strategies():
+    """
+    List all built-in trading strategies available for backtesting.
+
+    Returns strategy names, descriptions, best-use context, and default parameters.
+    """
+    return {
+        "strategies": [
+            {"id": name, **info}
+            for name, info in STRATEGY_DESCRIPTIONS.items()
+        ],
+        "count": len(ALL_STRATEGIES),
+    }
+
+
+# ── POST /backtest/strategy ────────────────────────────────────────────────────
+
+
+@router.post("/strategy")
+async def run_strategy_backtest(
+    req: StrategyBacktestRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run a built-in strategy backtest with realistic slippage and transaction costs.
+
+    Unlike /run (which uses AI signals from the database), /strategy generates
+    its own trading signals from raw price data using the selected algorithm.
+
+    Includes:
+    - Equity curve vs benchmark (Nifty 50 for IN, S&P 500 for US)
+    - All performance metrics (CAGR, Sharpe, Sortino, Calmar, max drawdown)
+    - Full trade log with entry/exit prices, P&L, hold days
+    - Cost breakdown: slippage + brokerage/STT/exchange fees
+    - Alpha, beta, excess return vs benchmark
+    - Monthly return heatmap data
+
+    Example strategies: RSI_MEAN_REVERSION, MACD_CROSSOVER, MA_CROSSOVER,
+    MOMENTUM, BOLLINGER_REVERSION, BUY_AND_HOLD
+    """
+    # Validation
+    if req.end_date <= req.start_date:
+        raise HTTPException(status_code=422, detail="end_date must be after start_date")
+    if (req.end_date - req.start_date).days < 30:
+        raise HTTPException(status_code=422, detail="Backtest window must be at least 30 days")
+    if req.strategy not in ALL_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown strategy '{req.strategy}'. Valid strategies: {ALL_STRATEGIES}"
+        )
+    if req.country.upper() not in ("IN", "US"):
+        raise HTTPException(status_code=422, detail="country must be 'IN' or 'US'")
+
+    # Sanitize tickers
+    tickers = [t.strip().upper() for t in req.tickers if t.strip()]
+    if not tickers:
+        raise HTTPException(status_code=422, detail="At least one ticker required")
+
+    logger.info(
+        "Strategy backtest: %s | tickers=%s | %s→%s | capital=%.0f | country=%s",
+        req.strategy, tickers, req.start_date, req.end_date, req.initial_capital, req.country
+    )
+
+    try:
+        engine = StrategyBacktestEngine(
+            strategy_name=req.strategy,
+            tickers=tickers,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            initial_capital=req.initial_capital,
+            country=req.country.upper(),
+            max_positions=req.max_positions,
+            stop_loss_pct=req.stop_loss_pct,
+            take_profit_pct=req.take_profit_pct,
+            apply_slippage=req.apply_slippage,
+            apply_costs=req.apply_costs,
+        )
+        result = await engine.run()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Strategy backtest failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Strategy backtest failed: {str(exc)}")
+
+
+# ── POST /backtest/compare ─────────────────────────────────────────────────────
+
+
+@router.post("/compare")
+async def compare_backtests(req: CompareRequest):
+    """
+    Compare two backtest results side by side.
+
+    Pass results from /run or /strategy as result_a and result_b.
+    Returns a detailed head-to-head comparison across all key metrics,
+    declaring a winner on each dimension and an overall winner.
+
+    Useful for:
+    - Strategy A vs Strategy B on same tickers/period
+    - With costs vs without costs
+    - Indian broker vs paper (no costs)
+    - Short backtest period vs long period
+    """
+    def _get_metrics(result: dict) -> dict:
+        return result.get("metrics", {})
+
+    def _safe(d: dict, key: str, default=0.0):
+        v = d.get(key, default)
+        return v if v is not None else default
+
+    ma = _get_metrics(req.result_a)
+    mb = _get_metrics(req.result_b)
+
+    metrics_to_compare = [
+        ("total_return_pct",  "Total Return (%)",      True,  "higher"),
+        ("cagr_pct",          "CAGR (%)",              True,  "higher"),
+        ("sharpe_ratio",      "Sharpe Ratio",          True,  "higher"),
+        ("sortino_ratio",     "Sortino Ratio",         True,  "higher"),
+        ("max_drawdown_pct",  "Max Drawdown (%)",      False, "lower (less negative)"),
+        ("calmar_ratio",      "Calmar Ratio",          True,  "higher"),
+        ("win_rate_pct",      "Win Rate (%)",          True,  "higher"),
+        ("profit_factor",     "Profit Factor",         True,  "higher"),
+        ("avg_hold_days",     "Avg Hold Days",         None,  "context dependent"),
+        ("total_trades",      "Total Trades",          None,  "context dependent"),
+    ]
+
+    head_to_head = []
+    a_wins = 0
+    b_wins = 0
+
+    for key, label, higher_is_better, note in metrics_to_compare:
+        va = _safe(ma, key)
+        vb = _safe(mb, key)
+
+        if higher_is_better is True:
+            winner = req.label_a if va > vb else (req.label_b if vb > va else "TIE")
+        elif higher_is_better is False:
+            # For drawdown: less negative (closer to 0) is better
+            winner = req.label_a if va > vb else (req.label_b if vb > va else "TIE")
+        else:
+            winner = "N/A"
+
+        if winner == req.label_a:
+            a_wins += 1
+        elif winner == req.label_b:
+            b_wins += 1
+
+        head_to_head.append({
+            "metric":          label,
+            "label_a":         req.label_a,
+            "value_a":         round(va, 4) if isinstance(va, float) else va,
+            "label_b":         req.label_b,
+            "value_b":         round(vb, 4) if isinstance(vb, float) else vb,
+            "winner":          winner,
+            "note":            note,
+        })
+
+    overall_winner = (
+        req.label_a if a_wins > b_wins else
+        req.label_b if b_wins > a_wins else "TIE"
+    )
+
+    # Return/risk comparison
+    ret_a = _safe(ma, "total_return_pct")
+    ret_b = _safe(mb, "total_return_pct")
+    dd_a  = abs(_safe(ma, "max_drawdown_pct"))
+    dd_b  = abs(_safe(mb, "max_drawdown_pct"))
+
+    return {
+        "overall_winner":   overall_winner,
+        "score":            {req.label_a: a_wins, req.label_b: b_wins},
+        "head_to_head":     head_to_head,
+        "summary": {
+            req.label_a: {
+                "return_pct":   ret_a,
+                "max_dd_pct":   _safe(ma, "max_drawdown_pct"),
+                "sharpe":       _safe(ma, "sharpe_ratio"),
+                "total_trades": _safe(ma, "total_trades", 0),
+                "costs_paid":   _safe(ma, "total_costs_paid"),
+            },
+            req.label_b: {
+                "return_pct":   ret_b,
+                "max_dd_pct":   _safe(mb, "max_drawdown_pct"),
+                "sharpe":       _safe(mb, "sharpe_ratio"),
+                "total_trades": _safe(mb, "total_trades", 0),
+                "costs_paid":   _safe(mb, "total_costs_paid"),
+            },
+        },
+        "insight": (
+            f"{overall_winner} wins {max(a_wins, b_wins)} vs {min(a_wins, b_wins)} metrics. "
+            f"Return difference: {abs(ret_a - ret_b):.2f}%. "
+            f"{'Costs drag: ' + str(round(abs(_safe(ma, 'total_costs_paid') - _safe(mb, 'total_costs_paid')), 2)) if (_safe(ma, 'total_costs_paid') or _safe(mb, 'total_costs_paid')) else ''}"
+        ).strip(),
+    }
