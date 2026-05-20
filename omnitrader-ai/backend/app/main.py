@@ -49,6 +49,7 @@ from app.api import tax as tax_router
 from app.api import rebalance as rebalance_router
 from app.api import copilot as copilot_router
 from app.api import alerts_automation as alerts_automation_router
+from app.api import intelligence as intelligence_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -211,6 +212,19 @@ async def run_automation_rules():
         logger.warning("[Automation] run failed: %s", exc)
 
 
+async def run_trade_scan():
+    """Scheduled job: scan market for trade opportunities."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            from app.engines.trade_scanner import TradeScanner
+            scanner = TradeScanner(db)
+            result = await scanner.run_scan()
+            logger.info("[Scheduler] Trade scan complete: %s", result)
+    except Exception as exc:
+        logger.error("[Scheduler] Trade scan failed: %s", exc)
+
+
 async def check_and_run_initial_load():
     """
     On boot: if stock_prices has fewer than 100 rows, trigger the full
@@ -346,6 +360,14 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_automation_rules, CronTrigger(minute="*/30"),
                       id="automation_rules", replace_existing=True)
 
+    # ── Trade Intelligence scan: 8:30 AM and 2:30 PM weekdays ─────────────────
+    scheduler.add_job(
+        run_trade_scan,
+        CronTrigger(hour="8,14", minute="30", day_of_week="mon-fri"),
+        id="trade_scan",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "[Scheduler] Jobs registered:\n"
@@ -409,6 +431,7 @@ app.include_router(tax_router.router)        # prefix already set in router (/ap
 app.include_router(rebalance_router.router)  # prefix already set in router (/api/v1/rebalance)
 app.include_router(copilot_router.router,      prefix="/api/v1/copilot",      tags=["copilot"])
 app.include_router(alerts_automation_router.router, prefix="/api/v1/automation", tags=["automation"])
+app.include_router(intelligence_router.router, prefix="/api/v1/intelligence", tags=["intelligence"])
 
 import os
 from fastapi.staticfiles import StaticFiles

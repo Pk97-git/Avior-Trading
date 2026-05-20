@@ -137,6 +137,36 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     last_result JSONB
 )
 """,
+    # ── Phase H: Trade Intelligence ────────────────────────────────────────────
+    """
+CREATE TABLE IF NOT EXISTS trade_opportunities (
+    id               SERIAL PRIMARY KEY,
+    ticker           VARCHAR(20) NOT NULL,
+    trade_type       VARCHAR(20) NOT NULL,
+    setup_name       VARCHAR(100) NOT NULL DEFAULT '',
+    thesis           TEXT,
+    entry_price      FLOAT,
+    entry_zone_low   FLOAT,
+    entry_zone_high  FLOAT,
+    stop_price       FLOAT,
+    target_price     FLOAT,
+    risk_reward      FLOAT,
+    time_horizon     VARCHAR(50),
+    confidence       INTEGER,
+    signals          JSONB,
+    risks            JSONB,
+    verdict          VARCHAR(20),
+    position_size_pct FLOAT,
+    status           VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at       TIMESTAMPTZ DEFAULT now(),
+    updated_at       TIMESTAMPTZ DEFAULT now(),
+    expires_at       TIMESTAMPTZ,
+    CONSTRAINT uq_opportunity_ticker_type UNIQUE (ticker, trade_type)
+)
+""",
+    "CREATE INDEX IF NOT EXISTS ix_trade_opp_ticker ON trade_opportunities (ticker)",
+    "CREATE INDEX IF NOT EXISTS ix_trade_opp_status ON trade_opportunities (status)",
+    "CREATE INDEX IF NOT EXISTS ix_trade_opp_confidence ON trade_opportunities (confidence DESC)",
     # Investment goals
     """
 CREATE TABLE IF NOT EXISTS investment_goals (

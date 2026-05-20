@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Date, ForeignKey, Boolean, Index, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Date, ForeignKey, Boolean, Index, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -772,3 +772,33 @@ class InvestmentGoal(Base):
     notes                = Column(Text)
     created_at           = Column(DateTime(timezone=True), default=lambda: _dt.utcnow())
     updated_at           = Column(DateTime(timezone=True), default=lambda: _dt.utcnow(), onupdate=lambda: _dt.utcnow())
+
+
+class TradeOpportunity(Base):
+    """Scanned trade setup — surfaced by TradeScanner, reviewed by user."""
+    __tablename__ = "trade_opportunities"
+    __table_args__ = (
+        UniqueConstraint("ticker", "trade_type", name="uq_opportunity_ticker_type"),
+    )
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    ticker           = Column(String(20), nullable=False, index=True)
+    trade_type       = Column(String(20), nullable=False)          # SWING | LONG_TERM | POSITIONAL
+    setup_name       = Column(String(100), nullable=False)
+    thesis           = Column(Text, nullable=True)
+    entry_price      = Column(Float, nullable=True)
+    entry_zone_low   = Column(Float, nullable=True)
+    entry_zone_high  = Column(Float, nullable=True)
+    stop_price       = Column(Float, nullable=True)
+    target_price     = Column(Float, nullable=True)
+    risk_reward      = Column(Float, nullable=True)
+    time_horizon     = Column(String(50), nullable=True)
+    confidence       = Column(Integer, nullable=True)              # 0–100
+    signals          = Column(JSONB, nullable=True)                 # technical signals dict
+    risks            = Column(JSONB, nullable=True)                 # list of risk strings
+    verdict          = Column(String(20), nullable=True)           # BUY | WAIT | SKIP | EXECUTE
+    position_size_pct = Column(Float, nullable=True)
+    status           = Column(String(20), default="ACTIVE", nullable=False)  # ACTIVE | EXECUTED | EXPIRED | SKIPPED
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    expires_at       = Column(DateTime(timezone=True), nullable=True)
