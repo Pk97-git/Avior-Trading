@@ -46,6 +46,7 @@ from app.api import analytics as analytics_router
 from app.api import research as research_router
 from app.api import goals as goals_router
 from app.api import tax as tax_router
+from app.api import rebalance as rebalance_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -366,6 +367,7 @@ app.include_router(analytics_router.router)  # prefix already set in router (/ap
 app.include_router(research_router.router)   # prefix already set in router (/api/v1/research)
 app.include_router(goals_router.router)
 app.include_router(tax_router.router)        # prefix already set in router (/api/v1/tax)
+app.include_router(rebalance_router.router)  # prefix already set in router (/api/v1/rebalance)
 
 import os
 from fastapi.staticfiles import StaticFiles
