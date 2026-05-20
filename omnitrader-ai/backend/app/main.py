@@ -51,6 +51,7 @@ from app.api import copilot as copilot_router
 from app.api import alerts_automation as alerts_automation_router
 from app.api import intelligence as intelligence_router
 from app.api import charts as charts_router
+from app.api import ai as ai_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -434,6 +435,7 @@ app.include_router(copilot_router.router,      prefix="/api/v1/copilot",      ta
 app.include_router(alerts_automation_router.router, prefix="/api/v1/automation", tags=["automation"])
 app.include_router(intelligence_router.router, prefix="/api/v1/intelligence", tags=["intelligence"])
 app.include_router(charts_router.router, prefix="/api/v1/charts", tags=["charts"])
+app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["ai"])
 
 import os
 from fastapi.staticfiles import StaticFiles
