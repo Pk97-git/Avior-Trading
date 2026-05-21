@@ -67,6 +67,7 @@ from app.api import dark_pool as dark_pool_router
 from app.api import quant as quant_router
 from app.api import portfolio_optimizer as portfolio_optimizer_router
 from app.api import alpha_signals as alpha_signals_router
+from app.api import advanced_risk as advanced_risk_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -497,6 +498,7 @@ app.include_router(dark_pool_router.router,    prefix="/api/v1/dark-pool",     t
 app.include_router(quant_router.router,        prefix="/api/v1/quant",          tags=["quant"])
 app.include_router(portfolio_optimizer_router.router, prefix="/api/v1/portfolio-optimizer", tags=["portfolio-optimizer"])
 app.include_router(alpha_signals_router.router, prefix="/api/v1/alpha", tags=["alpha"])
+app.include_router(advanced_risk_router.router, prefix="/api/v1/advanced-risk", tags=["advanced-risk"])
 
 import os
 from fastapi.staticfiles import StaticFiles

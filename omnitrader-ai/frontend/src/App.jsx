@@ -40,6 +40,7 @@ import DarkPool from './components/DarkPool';
 import QuantAnalysis from './components/QuantAnalysis';
 import AlphaSignals from './components/AlphaSignals';
 import PortfolioOptimizer from './components/PortfolioOptimizer';
+import AdvancedRisk from './components/AdvancedRisk';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -68,6 +69,7 @@ const TABS = [
     { id: 'backtest',        label: 'Backtest',          icon: FlaskConical },
     { id: 'quant',           label: 'Quant Analysis',    icon: FlaskConical },
     { id: 'optimizer',       label: 'Portfolio Optimizer', icon: PieChart },
+    { id: 'advanced-risk',  label: 'Advanced Risk',       icon: ShieldAlert },
     // ── Research ──────────────────────────────────────────────
     { id: 'screener',     label: 'Screener',            icon: Filter },
     { id: 'market',       label: 'Market Analysis',     icon: Activity },
@@ -100,7 +102,7 @@ const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
-    { label: 'Risk & Analytics', ids: ['risk', 'factors', 'shorts', 'position-sizer', 'stress-test', 'performance', 'backtest', 'quant', 'optimizer'] },
+    { label: 'Risk & Analytics', ids: ['risk', 'factors', 'shorts', 'position-sizer', 'stress-test', 'performance', 'backtest', 'quant', 'optimizer', 'advanced-risk'] },
     { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns', 'pairs', 'earnings-nlp', 'dark-pool', 'alpha'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
@@ -287,6 +289,7 @@ export default function App() {
                     {activeTab === 'earnings-nlp' && <EarningsNLP />}
                     {activeTab === 'dark-pool'    && <DarkPool />}
                     {activeTab === 'alpha'        && <AlphaSignals />}
+                    {activeTab === 'advanced-risk' && <AdvancedRisk />}
                     {activeTab === 'data'        && <IngestionDashboard onNavigate={handleNavigate} />}
                     {activeTab === 'jobs'        && <LiveJobsView />}
                     {activeTab === 'universe'    && <StockUniverse onNavigate={handleNavigate} />}

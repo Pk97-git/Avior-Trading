@@ -241,4 +241,12 @@ export const portfolioOptimizerApi = {
     current:        () => api.get('/portfolio-optimizer/current'),
 };
 
+export const advancedRiskApi = {
+    drawdown:        (body) => api.post('/advanced-risk/drawdown', body),
+    greeks:          (body) => api.post('/advanced-risk/greeks', body),
+    portfolioGreeks: (body) => api.post('/advanced-risk/portfolio-greeks', body),
+    correlation:     (params) => api.get('/advanced-risk/correlation', { params }),
+    tailRisk:        (body) => api.post('/advanced-risk/tail-risk', body),
+};
+
 export default api;
