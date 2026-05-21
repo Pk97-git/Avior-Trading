@@ -4,7 +4,7 @@ agents/portfolio.py
 ====================
 Portfolio Exposure & Correlation Control
 
-For the current STRONG_BUY + ACCUMULATE universe, this module:
+For the current BUY universe, this module:
   1. Computes sector concentration (Herfindahl index)
   2. Checks pairwise correlation for the top-50 signals
   3. Flags if adding a new ticker would break diversification rules
@@ -62,12 +62,12 @@ class PortfolioAgent:
 
     async def analyze(self) -> dict:
         try:
-            # Step 1: Get current STRONG_BUY/ACCUMULATE universe
+            # Step 1: Get current BUY universe
             res = await self.db.execute(text("""
                 SELECT DISTINCT ON (a.ticker) a.ticker, s.sector
                 FROM ai_analysis a
                 LEFT JOIN stocks s ON s.ticker = a.ticker
-                WHERE a.signal IN ('STRONG_BUY', 'ACCUMULATE')
+                WHERE a.signal = 'BUY'
                   AND a.analysis_date >= NOW() - INTERVAL '7 days'
                 ORDER BY a.ticker, a.analysis_date DESC
                 LIMIT 200

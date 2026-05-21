@@ -40,7 +40,7 @@ async def get_signals(
 ):
     """
     Paginated feed of signal-change alerts, newest first.
-    Filter by signal type (STRONG_BUY, ACCUMULATE, AVOID, DISTRIBUTION) and country.
+    Filter by signal type (BUY, HOLD, REDUCE, SELL) and country.
     """
     stmt = (
         select(Alert, Stock.name, Stock.sector, Stock.country)
@@ -64,6 +64,19 @@ async def get_signals(
     result = await db.execute(stmt)
     rows = result.fetchall()
 
+    # Batch-fetch latest prices for all tickers in this page
+    tickers_in_page = list({row[0].ticker for row in rows})
+    current_prices: dict = {}
+    if tickers_in_page:
+        price_q = text("""
+            SELECT DISTINCT ON (ticker) ticker, close
+            FROM stock_prices
+            WHERE ticker = ANY(:tickers)
+            ORDER BY ticker, time DESC
+        """)
+        price_r = await db.execute(price_q, {"tickers": tickers_in_page})
+        current_prices = {r.ticker: round(r.close, 2) for r in price_r.fetchall()}
+
     items = []
     for row in rows:
         alert, name, sector, country_code = row
@@ -81,6 +94,7 @@ async def get_signals(
             "image_url":       alert.image_url,
             "generated_at":    alert.generated_at,
             "is_read":         alert.is_read,
+            "current_price":   current_prices.get(alert.ticker),
         })
 
     return {
@@ -101,7 +115,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
       • Today's signal counts by type
       • Current macro regime
       • Average final score across all tickers analysed today
-      • Top 6 STRONG_BUY / ACCUMULATE signals from latest analysis
+      • Top 6 BUY / HOLD signals from latest analysis
       • Recent 20 alerts
     """
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -140,7 +154,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         .join(Stock, AIAnalysis.ticker == Stock.ticker, isouter=True)
         .where(
             AIAnalysis.analysis_date >= today,
-            AIAnalysis.signal.in_(["STRONG_BUY", "ACCUMULATE"]),
+            AIAnalysis.signal.in_(["BUY"]),
             AIAnalysis.final_score.isnot(None),
         )
         .order_by(AIAnalysis.final_score.desc())

@@ -4,7 +4,8 @@ sentiment_flow.py
 All news and market sentiment ingestion: tasks + flows.
 
 Data type : Headline sentiment scores attached to tickers
-Sources   : RSS feeds, Reddit public API, Stocktwits public API
+Sources   : RSS feeds, Reddit public API, Stocktwits public API,
+            Yahoo Finance news, FinViz news scraper
 Scoring   : Rule-based keyword matching (Phase 1)
             Gemini Pro / OpenAI LLM batch scoring (Phase 4, if key set)
 
@@ -23,11 +24,21 @@ Sub-categories:
                Excludes India (.NS/.BO), crypto (-USD), futures (=F),
                and indices (^) — Stocktwits uses plain US ticker symbols.
 
+  Yahoo Finance — Ticker-specific news via yfinance for all HIGH-tier tickers.
+                  Particularly useful for small/mid-cap coverage gaps.
+                  Only runs for tickers with sparse sentiment (< 5 records
+                  in the last 7 days).
+
+  FinViz — Scrapes the FinViz quote page news table for ticker-specific
+           headlines. Free, no auth. Rate-limited (0.5 s between requests).
+           Only runs for tickers with sparse sentiment (< 5 records in the
+           last 7 days).
+
 ──────────────────────────────────────────────────────────────
  HISTORICAL (initial / backfill)
 ──────────────────────────────────────────────────────────────
   sentiment_initial_flow()
-      Fetches the current-window data from all three sources.
+      Fetches the current-window data from all five sources.
       Note: RSS/Reddit/Stocktwits APIs only return recent data
       (no historical archive). Historical sentiment = what was
       collected during the initial ingestion run.
@@ -47,6 +58,7 @@ import logging
 import time
 
 from prefect import task, flow
+from sqlalchemy import text
 
 from app.db.session import AsyncSessionLocal
 from app.ingestion.infra.universe import UniverseManager
@@ -78,6 +90,42 @@ def _us_equity_tickers() -> list:
         if not any(t.endswith(x) for x in ("-USD", "=F", ".NS", ".BO", ".NYB"))
         and "^" not in t
     ]
+
+
+async def _sparse_coverage_tickers(min_records: int = 5, lookback_days: int = 7) -> list:
+    """
+    Returns HIGH-tier tickers that have fewer than `min_records` sentiment
+    records in the last `lookback_days` days.  These are the tickers that
+    Yahoo Finance and FinViz should cover to fill the gap.
+
+    US equities only — Yahoo Finance and FinViz both use plain US symbols;
+    India (.NS/.BO), indices (^), crypto (-USD), and futures (=F) are skipped.
+    """
+    mgr = UniverseManager(use_cache=True, cache_ttl_hours=24)
+    candidates = [
+        t for t in mgr.get_all_tickers("HIGH")
+        if not any(t.endswith(x) for x in ("-USD", "=F", ".NS", ".BO", ".NYB"))
+        and "^" not in t
+    ]
+
+    if not candidates:
+        return []
+
+    async with AsyncSessionLocal() as session:
+        # lookback_days is a trusted integer — safe to interpolate directly.
+        result = await session.execute(
+            text(f"""
+                SELECT ticker, COUNT(*) AS cnt
+                FROM news_sentiment
+                WHERE ticker = ANY(:tickers)
+                  AND time >= NOW() - INTERVAL '{lookback_days} days'
+                GROUP BY ticker
+            """),
+            {"tickers": candidates},
+        )
+        covered = {row.ticker: row.cnt for row in result.fetchall()}
+
+    return [t for t in candidates if covered.get(t, 0) < min_records]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -133,6 +181,40 @@ async def task_sentiment_stocktwits() -> dict:
             "duration_s": round(time.monotonic() - _t, 1)}
 
 
+@task(name="Sentiment — Yahoo Finance News", retries=1)
+async def task_sentiment_yahoo_finance() -> dict:
+    """
+    Fetches ticker-specific news from Yahoo Finance via yfinance.
+    Only targets HIGH-tier US equity tickers that have sparse sentiment
+    coverage (fewer than 5 records in the last 7 days), so we focus
+    effort on small/mid-cap names that RSS/Reddit miss.
+    """
+    tickers = await _sparse_coverage_tickers(min_records=5, lookback_days=7)
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = SentimentService(session)
+        await svc.fetch_yahoo_finance_news(tickers)
+    return {"source": "Yahoo Finance", "tickers": len(tickers),
+            "duration_s": round(time.monotonic() - _t, 1)}
+
+
+@task(name="Sentiment — FinViz News", retries=1)
+async def task_sentiment_finviz() -> dict:
+    """
+    Scrapes ticker-specific headlines from FinViz quote pages.
+    Only targets HIGH-tier US equity tickers with sparse sentiment
+    coverage (fewer than 5 records in the last 7 days).
+    FinViz caps at 30 tickers per call with 0.5 s polite rate limiting.
+    """
+    tickers = await _sparse_coverage_tickers(min_records=5, lookback_days=7)
+    _t = time.monotonic()
+    async with AsyncSessionLocal() as session:
+        svc = SentimentService(session)
+        await svc.fetch_finviz_news(tickers)
+    return {"source": "FinViz", "tickers": len(tickers),
+            "duration_s": round(time.monotonic() - _t, 1)}
+
+
 # ══════════════════════════════════════════════════════════════
 # HISTORICAL — run once on fresh install
 # ══════════════════════════════════════════════════════════════
@@ -141,8 +223,9 @@ async def task_sentiment_stocktwits() -> dict:
 async def sentiment_initial_flow():
     """
     Bootstraps the sentiment database with the earliest available data
-    from all three sources. RSS/Reddit/Stocktwits only expose current
+    from all five sources. RSS/Reddit/Stocktwits only expose current
     windows, so this captures the starting point of the time series.
+    Yahoo Finance and FinViz fill ticker-level gaps for small/mid caps.
     Run as early as possible in the overall setup sequence.
     """
     logger.info("=== [Sentiment] Initial Load ===")
@@ -152,6 +235,10 @@ async def sentiment_initial_flow():
     logger.info("Reddit: %s", r2)
     r3 = await task_sentiment_stocktwits()
     logger.info("Stocktwits: %s", r3)
+    r4 = await task_sentiment_yahoo_finance()
+    logger.info("Yahoo Finance: %s", r4)
+    r5 = await task_sentiment_finviz()
+    logger.info("FinViz: %s", r5)
     logger.info("=== [Sentiment] Initial Load Complete ===")
 
 
@@ -165,7 +252,9 @@ async def sentiment_daily_flow():
     Fetches fresh sentiment data after both India and US markets close.
     Runs nightly at 22:00 UTC (weekdays).
     Builds the daily sentiment time series used by the Sentiment Agent.
-    All three sources run in sequence to avoid concurrent rate-limit pressure.
+    All five sources run in sequence to avoid concurrent rate-limit pressure.
+    Yahoo Finance and FinViz are limited to tickers with sparse coverage
+    (< 5 records in the last 7 days) to keep runtime bounded.
     """
     logger.info("=== [Sentiment] Daily Update ===")
     r1 = await task_sentiment_rss()
@@ -174,4 +263,8 @@ async def sentiment_daily_flow():
     logger.info("Reddit: %s", r2)
     r3 = await task_sentiment_stocktwits()
     logger.info("Stocktwits: %s", r3)
+    r4 = await task_sentiment_yahoo_finance()
+    logger.info("Yahoo Finance: %s", r4)
+    r5 = await task_sentiment_finviz()
+    logger.info("FinViz: %s", r5)
     logger.info("=== [Sentiment] Daily Update Complete ===")

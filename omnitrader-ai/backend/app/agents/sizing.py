@@ -59,6 +59,7 @@ class SizingEngine:
         calibrated_prob: float,
         final_score: int,
         upside_downside_ratio: float = 1.5,  # default if no technical targets
+        caution_mode: bool = False,           # circuit breaker caution → halve kelly
     ) -> dict:
         try:
             atr = await self._compute_atr_from_db()
@@ -88,16 +89,29 @@ class SizingEngine:
             if final_score < 55:
                 final_fraction = 0.0
 
+            # Circuit breaker caution: halve position size to reduce risk exposure
+            if caution_mode and final_fraction > 0.0:
+                final_fraction *= 0.5
+                logger.info("SizingEngine [%s]: caution_mode active — kelly halved to %.4f",
+                            self.ticker, final_fraction)
+
             volatility_note = (
                 f"14d ATR = {atr:.2f} ({atr_ratio*100:.1f}% of price). "
                 f"Kelly={kelly:.1%} → Half-Kelly={half_kelly:.1%} → "
                 f"Vol-adjusted={final_fraction:.1%}"
             )
 
+            # ATR-based trade levels (2×ATR stop, 6×ATR target = 3:1 R:R)
+            stop_loss   = round(current_price - 2 * atr, 4) if (atr and current_price) else None
+            take_profit = round(current_price + 6 * atr, 4) if (atr and current_price) else None
+
             return {
                 "kelly_fraction":   round(final_fraction, 4),
                 "max_position_pct": round(final_fraction * 100, 2),
                 "atr_14":           round(atr, 4) if atr else None,
+                "entry_price":      round(current_price, 4) if current_price else None,
+                "stop_loss":        stop_loss,
+                "take_profit":      take_profit,
                 "volatility_note":  volatility_note,
             }
 
@@ -107,6 +121,9 @@ class SizingEngine:
                 "kelly_fraction":   0.0,
                 "max_position_pct": 0.0,
                 "atr_14":           None,
+                "entry_price":      None,
+                "stop_loss":        None,
+                "take_profit":      None,
                 "volatility_note":  "Sizing unavailable.",
             }
 

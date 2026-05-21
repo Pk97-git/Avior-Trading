@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { agentsApi } from '../api';
-import { Filter, Loader2, ChevronLeft, ChevronRight, RefreshCw, Search, Zap, X, Brain } from 'lucide-react';
+import { agentsApi, watchlistApi } from '../api';
+import { Filter, Loader2, ChevronLeft, ChevronRight, RefreshCw, Search, Zap, X, Brain, Star, StarOff, TrendingUp, TrendingDown, Target } from 'lucide-react';
 import { SignalBadge } from './shared/SignalCard';
 
 const SIGNAL_TYPES = ['ALL', 'STRONG_BUY', 'ACCUMULATE', 'PROACTIVE_SWING', 'AVOID', 'DISTRIBUTION'];
@@ -108,6 +108,8 @@ function SlideOverPanel({ ticker, alertItem, onClose, onRefresh }) {
     const [loading, setLoading] = useState(true);
     const [runningFresh, setRunningFresh] = useState(false);
     const [error, setError] = useState(null);
+    const [watchlisted, setWatchlisted] = useState(false);
+    const [watchlistBusy, setWatchlistBusy] = useState(false);
 
     const fetchAnalysis = useCallback(async (t) => {
         setLoading(true);
@@ -141,6 +143,23 @@ function SlideOverPanel({ ticker, alertItem, onClose, onRefresh }) {
         }
     };
 
+    const toggleWatchlist = async () => {
+        setWatchlistBusy(true);
+        try {
+            if (watchlisted) {
+                await watchlistApi.removeTicker(ticker);
+                setWatchlisted(false);
+            } else {
+                await watchlistApi.addTicker(ticker);
+                setWatchlisted(true);
+            }
+        } catch (e) {
+            console.error('Watchlist toggle failed:', e?.response?.data?.detail || e);
+        } finally {
+            setWatchlistBusy(false);
+        }
+    };
+
     const factorScores = analysis?.factor_scores || {};
     const hasFactors = Object.keys(factorScores).length > 0;
     const analogs = analysis?.analogs || [];
@@ -149,6 +168,11 @@ function SlideOverPanel({ ticker, alertItem, onClose, onRefresh }) {
     const calibratedProb = analysis?.calibrated_prob;
     const executionNote = analysis?.execution_note;
     const volatilityNote = analysis?.volatility_note;
+    const entryPrice  = analysis?.entry_price;
+    const stopLoss    = analysis?.stop_loss;
+    const takeProfit  = analysis?.take_profit;
+    const atr14       = analysis?.atr_14;
+    const hasLevels   = entryPrice || stopLoss || takeProfit;
 
     return (
         <div className="fixed inset-y-0 right-0 w-full md:w-[620px] lg:w-[860px] bg-background border-l border-border shadow-2xl z-50 flex flex-col transform transition-transform duration-300">
@@ -163,6 +187,21 @@ function SlideOverPanel({ ticker, alertItem, onClose, onRefresh }) {
                     ) : null}
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={toggleWatchlist}
+                        disabled={watchlistBusy}
+                        title={watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+                        className={`p-1.5 rounded-md border transition-colors disabled:opacity-50 ${
+                            watchlisted
+                                ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20'
+                                : 'border-border text-muted-foreground hover:bg-accent'
+                        }`}
+                    >
+                        {watchlistBusy
+                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                            : watchlisted ? <Star className="h-4 w-4 fill-current" /> : <Star className="h-4 w-4" />
+                        }
+                    </button>
                     <button
                         onClick={runFreshAnalysis}
                         disabled={runningFresh || loading}
@@ -255,6 +294,56 @@ function SlideOverPanel({ ticker, alertItem, onClose, onRefresh }) {
                                     )}
                                     {executionNote && (
                                         <p className="text-xs text-muted-foreground bg-muted/20 p-2 rounded">{executionNote}</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* ── Trade Levels ── */}
+                            {hasLevels && (
+                                <div className="p-4 bg-card border border-border rounded-xl shadow-sm">
+                                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-blue-400">
+                                        <Target className="h-4 w-4" /> Trade Levels (ATR-Based)
+                                    </h3>
+                                    <div className="grid grid-cols-3 gap-3 mb-2">
+                                        {entryPrice != null && (
+                                            <div className="bg-muted/30 rounded-lg p-3 text-center">
+                                                <p className="text-xs text-muted-foreground mb-1">Entry Price</p>
+                                                <p className="text-lg font-bold tabular-nums text-foreground">
+                                                    ${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                                <p className="text-[10px] text-muted-foreground">latest close</p>
+                                            </div>
+                                        )}
+                                        {stopLoss != null && (
+                                            <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-center">
+                                                <p className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
+                                                    <TrendingDown className="h-3 w-3 text-red-400" /> Stop Loss
+                                                </p>
+                                                <p className="text-lg font-bold tabular-nums text-red-400">
+                                                    ${stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                                <p className="text-[10px] text-muted-foreground">2× ATR below entry</p>
+                                            </div>
+                                        )}
+                                        {takeProfit != null && (
+                                            <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-center">
+                                                <p className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
+                                                    <TrendingUp className="h-3 w-3 text-emerald-400" /> Take Profit
+                                                </p>
+                                                <p className="text-lg font-bold tabular-nums text-emerald-400">
+                                                    ${takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                                <p className="text-[10px] text-muted-foreground">6× ATR (3:1 R/R)</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {atr14 != null && entryPrice != null && (
+                                        <p className="text-xs text-muted-foreground bg-muted/20 p-2 rounded">
+                                            14d ATR: ${atr14.toFixed(2)} ({((atr14 / entryPrice) * 100).toFixed(1)}% of price)
+                                            {stopLoss != null && takeProfit != null && (
+                                                <> · Risk ${(entryPrice - stopLoss).toFixed(2)} → Reward ${(takeProfit - entryPrice).toFixed(2)}</>
+                                            )}
+                                        </p>
                                     )}
                                 </div>
                             )}
@@ -508,6 +597,7 @@ export default function IntelligenceHub({ initialTicker }) {
                                 <tr>
                                     <th className="text-left px-5 py-3 font-semibold">Asset</th>
                                     <th className="text-left px-5 py-3 font-semibold">Signal</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Price</th>
                                     <th className="text-right px-5 py-3 font-semibold">Conviction</th>
                                     <th className="text-left px-5 py-3 font-semibold hidden md:table-cell">Headline Analysis</th>
                                     <th className="text-right px-5 py-3 font-semibold hidden lg:table-cell">Generated</th>
@@ -547,6 +637,12 @@ export default function IntelligenceHub({ initialTicker }) {
                                                     </span>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className="px-5 py-4 text-right tabular-nums text-xs font-semibold">
+                                            {item.current_price != null
+                                                ? `$${item.current_price.toLocaleString()}`
+                                                : <span className="text-muted-foreground/40">—</span>
+                                            }
                                         </td>
                                         <td className="px-5 py-4 text-right tabular-nums">
                                             {item.final_score != null ? (

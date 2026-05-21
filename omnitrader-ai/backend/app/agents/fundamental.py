@@ -1,7 +1,7 @@
 import logging
 import math
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.models.market_data import CompanyFinancials
 
 logger = logging.getLogger("omnitrader.agent.fundamental")
@@ -194,6 +194,123 @@ class FundamentalAgent:
             else:
                 score -= 10
                 thesis.append(f"High leverage D/E {de:.2f} — elevated financial risk.")
+
+        # ── Dividend Yield & Growth ───────────────────────────────────────────
+        try:
+            div_res = await self.db.execute(text("""
+                SELECT yield_fwd, div_cagr_5y
+                FROM dividends
+                WHERE ticker = :t
+                ORDER BY ex_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            div_row = div_res.fetchone()
+            if div_row:
+                if div_row.yield_fwd and div_row.yield_fwd > 0:
+                    y = div_row.yield_fwd
+                    if y > 5:
+                        score += 6
+                        thesis.append(f"High dividend yield {y:.1f}% — strong income stream.")
+                    elif y > 2:
+                        score += 3
+                        thesis.append(f"Dividend yield {y:.1f}% — returns cash to shareholders.")
+                if div_row.div_cagr_5y and div_row.div_cagr_5y > 0:
+                    cagr = div_row.div_cagr_5y
+                    if cagr > 10:
+                        score += 5
+                        thesis.append(f"Dividend CAGR {cagr:.1f}% over 5 years — dividend growth compounder.")
+                    elif cagr > 5:
+                        score += 2
+                        thesis.append(f"Dividend growing at {cagr:.1f}% annually.")
+        except Exception:
+            pass
+
+        # ── Earnings Surprise ─────────────────────────────────────────────────
+        try:
+            surp_res = await self.db.execute(text("""
+                SELECT eps_surprise_pct, fiscal_date
+                FROM company_financials
+                WHERE ticker = :t AND eps_surprise_pct IS NOT NULL
+                ORDER BY fiscal_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            surp_row = surp_res.fetchone()
+            if surp_row:
+                s = surp_row.eps_surprise_pct
+                if s > 10:
+                    score += 8
+                    thesis.append(f"Earnings beat consensus by +{s:.1f}% — positive surprise momentum (PEAD).")
+                elif s > 3:
+                    score += 4
+                    thesis.append(f"Earnings beat consensus by +{s:.1f}%.")
+                elif s < -10:
+                    score -= 8
+                    thesis.append(f"Earnings missed consensus by {s:.1f}% — negative surprise risk.")
+                elif s < -3:
+                    score -= 4
+                    thesis.append(f"Earnings slightly missed consensus ({s:.1f}%).")
+        except Exception:
+            pass
+
+        # ── Valuation Models (DCF / EV/EBITDA / P/B / PEG) ───────────────────
+        try:
+            val_res = await self.db.execute(text("""
+                SELECT pe_ratio, pb_ratio, ps_ratio, peg_ratio, ev_ebitda,
+                       dcf_value, margin_of_safety, valuation_label, composite_score,
+                       current_price
+                FROM valuation_metrics
+                WHERE ticker = :t
+                ORDER BY computed_date DESC LIMIT 1
+            """), {"t": self.ticker})
+            val = val_res.fetchone()
+            if val:
+                # DCF Margin of Safety
+                if val.margin_of_safety is not None:
+                    mos = val.margin_of_safety
+                    if mos > 30:
+                        score += 12
+                        thesis.append(f"DCF margin of safety +{mos:.0f}% — significantly undervalued vs intrinsic value.")
+                    elif mos > 10:
+                        score += 6
+                        thesis.append(f"DCF margin of safety +{mos:.0f}% — modest undervaluation.")
+                    elif mos < -30:
+                        score -= 12
+                        thesis.append(f"DCF margin of safety {mos:.0f}% — price far exceeds intrinsic value.")
+                    elif mos < -10:
+                        score -= 5
+                        thesis.append(f"Slight DCF overvaluation (margin of safety {mos:.0f}%).")
+
+                # PEG ratio (growth-adjusted PE)
+                if val.peg_ratio is not None:
+                    peg = val.peg_ratio
+                    if peg < 0.8:
+                        score += 8
+                        thesis.append(f"PEG ratio {peg:.2f} — growth at a discount (PEG < 1 = undervalued growth).")
+                    elif peg < 1.2:
+                        score += 4
+                        thesis.append(f"PEG ratio {peg:.2f} — reasonably priced for growth.")
+                    elif peg > 2.5:
+                        score -= 6
+                        thesis.append(f"PEG ratio {peg:.2f} — paying high premium for growth.")
+
+                # EV/EBITDA
+                if val.ev_ebitda is not None:
+                    ev_eb = val.ev_ebitda
+                    if ev_eb < 8:
+                        score += 6
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — cheap on enterprise value basis.")
+                    elif ev_eb < 15:
+                        score += 2
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — fair valuation.")
+                    elif ev_eb > 30:
+                        score -= 6
+                        thesis.append(f"EV/EBITDA {ev_eb:.1f}× — premium multiple; requires strong growth.")
+
+                # Valuation label summary
+                if val.valuation_label == "DEEP_VALUE":
+                    thesis.append("Valuation: DEEP VALUE — multiple metrics indicate significant undervaluation.")
+                elif val.valuation_label == "EXPENSIVE":
+                    thesis.append(f"Valuation: EXPENSIVE — trading at premium across multiple metrics.")
+        except Exception as e:
+            logger.debug("Valuation metrics fetch for %s: %s", self.ticker, e)
 
         score = max(0, min(100, score))
         logger.info("FundamentalAgent %s: score=%d", self.ticker, score)

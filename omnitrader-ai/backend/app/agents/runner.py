@@ -40,6 +40,35 @@ from app.agents.calibration import CalibrationEngine
 from app.agents.sizing import SizingEngine
 from app.agents.execution import ExecutionModel
 from app.agents.executive import ExecutiveTrader
+try:
+    from app.agents.transcript import TranscriptAgent
+    _TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    _TRANSCRIPT_AVAILABLE = False
+
+try:
+    from app.agents.risk import RiskAgent
+    _RISK_AGENT_AVAILABLE = True
+except ImportError:
+    _RISK_AGENT_AVAILABLE = False
+
+try:
+    from app.agents.news import NewsAgent
+    _NEWS_AGENT_AVAILABLE = True
+except ImportError:
+    _NEWS_AGENT_AVAILABLE = False
+
+try:
+    from app.agents.market import MarketAgent
+    _MARKET_AGENT_AVAILABLE = True
+except ImportError:
+    _MARKET_AGENT_AVAILABLE = False
+
+try:
+    from app.agents.execution_agent import ExecutionAgent
+    _EXECUTION_AGENT_AVAILABLE = True
+except ImportError:
+    _EXECUTION_AGENT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +176,14 @@ async def _create_alert(
     )
     db.add(alert)
 
+    # Fire notifications (non-blocking — errors are caught and logged)
+    try:
+        from app.services.notifications import NotificationService
+        notif = NotificationService()
+        await notif.send_alert(ticker, signal, previous_signal, final_score, signal_thesis[:3])
+    except Exception as e:
+        logger.warning("Notification failed for %s: %s", ticker, e)
+
 
 async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     """
@@ -157,6 +194,26 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     logger.info("Running all agents for %s", ticker)
 
     analysis_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # ── Circuit breaker gate — skip analysis if market conditions say HALT ──
+    from app.engines.circuit_breaker import CircuitBreakerEngine
+    cb = CircuitBreakerEngine(db)
+    cb_state = await cb.check()
+    if not cb_state["trading_allowed"]:
+        logger.warning("[CircuitBreaker] HALT for %s — reasons: %s", ticker, cb_state["reasons"])
+        # Still return a minimal result so callers don't crash
+        return {
+            "ticker": ticker,
+            "analysis_date": analysis_date.isoformat(),
+            "signal": "REDUCE",
+            "final_score": 30,
+            "regime": "Unknown",
+            "circuit_breaker": cb_state,
+            "signal_thesis": cb_state["reasons"],
+        }
+    elif cb_state["caution"]:
+        logger.info("[CircuitBreaker] CAUTION for %s — %s", ticker, cb_state["reasons"])
+        # Continue analysis but flag it in the result
 
     # ── Phase 1: Core agents (run sequentially to avoid asyncpg session conflicts) ──
     try:
@@ -173,6 +230,13 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         macro_result = await MacroAgent(db, ticker).analyze()
     except Exception as e:
         macro_result = e
+
+    market_result = {"score": 50, "thesis": [], "market_regime": "Unknown"}
+    if _MARKET_AGENT_AVAILABLE:
+        try:
+            market_result = await MarketAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("MarketAgent failed for %s: %s", ticker, e)
 
     try:
         inst_result = await InstitutionalAgent(db, ticker).analyze()
@@ -194,6 +258,27 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     except Exception as e:
         vision_result = e
 
+    risk_result = {"score": 50, "thesis": [], "risk_flags": []}
+    if _RISK_AGENT_AVAILABLE:
+        try:
+            risk_result = await RiskAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("RiskAgent failed for %s: %s", ticker, e)
+
+    news_result = {"score": 50, "thesis": [], "breaking_event": None}
+    if _NEWS_AGENT_AVAILABLE:
+        try:
+            news_result = await NewsAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("NewsAgent failed for %s: %s", ticker, e)
+
+    transcript_result = {"score": 50, "thesis": [], "summary": None}
+    if _TRANSCRIPT_AVAILABLE:
+        try:
+            transcript_result = await TranscriptAgent(db, ticker).analyze()
+        except Exception as e:
+            logger.debug("TranscriptAgent failed for %s: %s", ticker, e)
+
     def _safe(result, default_score=50, name=""):
         if isinstance(result, Exception):
             logger.error("Agent %s failed for %s: %s", name, ticker, result)
@@ -207,6 +292,24 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     sent_result   = _safe(sent_result,   name="Sentiment")
     mem_result    = _safe(mem_result,    name="Memory")
     vision_result = _safe(vision_result, name="Vision")
+
+    # Blend market conditions into macro score (market internals refine economic view)
+    if market_result.get("thesis"):
+        m_delta = market_result["score"] - 50
+        macro_result["score"] = max(0, min(100, macro_result["score"] + round(m_delta * 0.20)))
+        macro_result.setdefault("thesis", []).extend(market_result["thesis"])
+
+    # Blend breaking news (48h) into sentiment score — news velocity matters
+    if news_result.get("thesis"):
+        n_delta = news_result["score"] - 50
+        sent_result["score"] = max(0, min(100, sent_result["score"] + round(n_delta * 0.25)))
+        sent_result.setdefault("thesis", []).extend(news_result["thesis"])
+
+    # Blend transcript guidance/tone into fundamental score (minor adjustment)
+    if transcript_result.get("thesis"):
+        t_delta = transcript_result["score"] - 50  # -50 to +50
+        fund_result["score"] = max(0, min(100, fund_result["score"] + round(t_delta * 0.15)))
+        fund_result.setdefault("thesis", []).extend(transcript_result["thesis"])
 
     regime = macro_result.get("regime", "Unknown")
 
@@ -259,6 +362,7 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         sentiment_score     = sent_result["score"],
         vision_score        = vision_result.get("score", 50),
         factor_score        = factor_result.get("score", 50),
+        risk_score          = risk_result["score"],
         fundamental_thesis   = fund_result.get("thesis"),
         technical_thesis     = tech_result.get("thesis"),
         macro_thesis         = macro_result.get("thesis"),
@@ -266,9 +370,19 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         sentiment_thesis     = sent_result.get("thesis"),
         vision_thesis        = vision_result.get("thesis"),
         factor_thesis        = factor_result.get("thesis"),
+        risk_thesis          = risk_result.get("thesis"),
         regime               = regime,
         weight_nudge         = weight_nudge or None,
     )
+
+    exec_agent_result = {"score": 50, "thesis": [], "should_execute": True, "execution_notes": ""}
+    if _EXECUTION_AGENT_AVAILABLE:
+        try:
+            exec_agent_result = await ExecutionAgent(db, ticker).analyze(
+                final_score=exec_result["final_score"]
+            )
+        except Exception as e:
+            logger.debug("ExecutionAgent failed for %s: %s", ticker, e)
 
     # ── Phase 3: Risk sizing pipeline ───────────────────────────────────────
     calibrator = CalibrationEngine(db)
@@ -276,7 +390,11 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
     calibrated_prob = calibrator.predict(exec_result["final_score"])
 
     sizing = SizingEngine(db, ticker)
-    sizing_result = await sizing.compute(calibrated_prob, exec_result["final_score"])
+    sizing_result = await sizing.compute(
+        calibrated_prob,
+        exec_result["final_score"],
+        caution_mode=cb_state.get("caution", False),
+    )
 
     execution = ExecutionModel(db, ticker)
     exec_cost_result = await execution.adjust(sizing_result["kelly_fraction"])
@@ -306,13 +424,34 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "memory_thesis":           mem_result.get("thesis", []),
         "vision_thesis":           vision_result.get("thesis", []),
         "signal_thesis":           exec_result["signal_thesis"],
-        # Phase 2 extras
+        # Phase 2: strategist outputs (now stored in DB)
         "factor_scores":           factor_result.get("factor_scores", {}),
         "cross_asset_sensitivity": cross_asset_result.get("cross_asset_sensitivity", {}),
-        # Phase 3 risk
+        # Phase 3: risk outputs (now stored in DB)
         "calibrated_prob":         calibrated_prob,
         "kelly_fraction":          final_kelly,
         "max_position_pct":        final_position_pct,
+        # Memory analogs (stored so GET analysis returns them without re-running)
+        "analogs":                 mem_result.get("analogs", []),
+        # Trade levels from SizingEngine
+        "entry_price":             sizing_result.get("entry_price"),
+        "stop_loss":               sizing_result.get("stop_loss"),
+        "take_profit":             sizing_result.get("take_profit"),
+        "atr_14":                  sizing_result.get("atr_14"),
+        # Transcript intelligence
+        "earnings_summary":        transcript_result.get("summary"),
+        # Risk agent outputs
+        "risk_score":              risk_result["score"],
+        "risk_flags":              risk_result.get("risk_flags", []),
+        "risk_thesis":             risk_result.get("thesis", []),
+        # Breaking news
+        "breaking_news":           news_result.get("breaking_event"),
+        # Market internals (MarketAgent)
+        "market_regime":           market_result.get("market_regime", "Unknown"),
+        "market_score":            market_result.get("score", 50),
+        # Execution gate (ExecutionAgent)
+        "should_execute":          exec_agent_result.get("should_execute", True),
+        "execution_notes":         exec_agent_result.get("execution_notes", ""),
     }
 
     # ── Persist ──────────────────────────────────────────────────────────────
@@ -333,6 +472,42 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         logger.info("Saved analysis for %s: signal=%s score=%d kelly=%.1f%%",
                     ticker, exec_result["signal"], exec_result["final_score"], final_position_pct)
 
+        # Auto-execution (opt-in via AUTO_EXECUTE env var)
+        import os
+        if os.getenv("AUTO_EXECUTE", "false").lower() == "true":
+            try:
+                from app.services.order_manager import OrderManager
+                order_mgr = OrderManager(db)
+                signal = exec_result["signal"]
+
+                if signal == "BUY":
+                    await order_mgr.submit_from_analysis(ticker, exec_result, sizing_result)
+                    logger.info("[AutoExec] BUY order submitted for %s", ticker)
+
+                elif signal == "REDUCE":
+                    # Partial exit — reduce position by 50%
+                    pos_res = await db.execute(text("""
+                        SELECT id, quantity, avg_price FROM portfolio_positions
+                        WHERE ticker = :t AND status = 'OPEN' LIMIT 1
+                    """), {"t": ticker})
+                    pos = pos_res.fetchone()
+                    if pos and pos.quantity > 0:
+                        reduce_qty = max(1, pos.quantity // 2)
+                        await order_mgr.submit_reduce(ticker, reduce_qty, exec_result)
+                        logger.info("[AutoExec] REDUCE order (%d shares) submitted for %s", reduce_qty, ticker)
+
+                elif signal == "SELL":
+                    pos_res = await db.execute(text("""
+                        SELECT id, quantity FROM portfolio_positions
+                        WHERE ticker = :t AND status = 'OPEN' LIMIT 1
+                    """), {"t": ticker})
+                    pos = pos_res.fetchone()
+                    if pos and pos.quantity > 0:
+                        await order_mgr.submit_sell(ticker, pos.quantity, exec_result)
+                        logger.info("[AutoExec] SELL order submitted for %s", ticker)
+            except Exception as e:
+                logger.error("[AutoExec] Order submission failed for %s: %s", ticker, e)
+
     except Exception as e:
         await db.rollback()
         logger.error("Failed to persist analysis for %s: %s", ticker, e)
@@ -346,4 +521,5 @@ async def run_all_agents(db: AsyncSession, ticker: str) -> dict:
         "correlated_peer": portfolio_result.get("correlated_peer"),
         "execution_note": exec_cost_result.get("execution_note"),
         "volatility_note": sizing_result.get("volatility_note"),
+        "circuit_breaker": cb_state,
     }

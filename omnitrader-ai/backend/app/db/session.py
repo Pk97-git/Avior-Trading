@@ -11,6 +11,16 @@ AsyncSessionLocal = sessionmaker(
     autoflush=False
 )
 
+# Alias used by background services
+async_session_factory = AsyncSessionLocal
+
+
 async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+# Alias used by API endpoints
+async def get_async_db():
     async with AsyncSessionLocal() as session:
         yield session

@@ -1,14 +1,12 @@
 import logging
-import pandas as pd
-from sqlalchemy.orm import Session
-from sqlalchemy import select, text
-from app.models.market_data import StockPrice
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 logger = logging.getLogger("omnitrader.agent.technical")
 
 
 class TechnicalAgent:
-    def __init__(self, db: Session, ticker: str):
+    def __init__(self, db: AsyncSession, ticker: str):
         self.db = db
         self.ticker = ticker
 
@@ -18,66 +16,63 @@ class TechnicalAgent:
           1. Trend structure     — price vs SMA20/50/200, golden/death cross
           2. MACD                — signal line crossover (bullish/bearish)
           3. RSI                 — overbought / oversold / momentum
-          4. Volume surge        — 5-day avg vs 20-day avg ratio
-          5. Relative strength   — stock returns vs SPY/Nifty over 63 days
-          6. Breakout proximity  — price within 5% of 52-week high
+          4. Volume surge        — vol_ratio vs 20-day avg (pre-computed)
+          5. Relative strength   — rs_vs_spx or rs_vs_nsei (pre-computed, 63-day)
+          6. Breakout proximity  — price vs week_52_high (pre-computed)
 
-        Returns: {"score": int, "thesis": list[str]}
+        Reads from stock_technicals (pre-computed) + 1 price row.
+        Returns: {"score": int, "thesis": list[str], "atr_14": float|None}
         """
-        stmt = select(StockPrice).where(
-            StockPrice.ticker == self.ticker
-        ).order_by(StockPrice.time.desc()).limit(300)
+        # Fetch latest 2 rows from stock_technicals for crossover detection
+        tech_result = await self.db.execute(text("""
+            SELECT date, sma_20, sma_50, sma_200,
+                   rsi_14, macd, macd_signal, macd_hist,
+                   atr_14, bb_upper, bb_lower,
+                   vol_ratio, week_52_high, week_52_low,
+                   rs_vs_spx, rs_vs_nsei
+            FROM stock_technicals
+            WHERE ticker = :ticker
+            ORDER BY date DESC
+            LIMIT 2
+        """), {"ticker": self.ticker})
+        rows = tech_result.fetchall()
 
-        result = await self.db.execute(stmt)
-        prices = result.scalars().all()
-
-        if not prices or len(prices) < 50:
+        if not rows:
             return {
-                "score": 0,
-                "thesis": ["Insufficient price history (need 50+ days) for technical analysis."]
+                "score": 50,
+                "thesis": ["Technical indicators not yet computed for this ticker."],
+                "atr_14": None,
             }
 
-        df = pd.DataFrame([{
-            "time":   p.time,
-            "close":  p.close,
-            "high":   p.high,
-            "low":    p.low,
-            "volume": p.volume,
-        } for p in prices]).sort_values("time").reset_index(drop=True)
+        latest = rows[0]
+        prev   = rows[1] if len(rows) > 1 else rows[0]
 
-        # Moving averages
-        df["SMA_20"]  = df["close"].rolling(20).mean()
-        df["SMA_50"]  = df["close"].rolling(50).mean()
-        df["SMA_200"] = df["close"].rolling(200).mean() if len(df) >= 200 else pd.Series([None] * len(df))
+        # Fetch current price (one row)
+        price_result = await self.db.execute(text("""
+            SELECT close FROM stock_prices
+            WHERE ticker = :ticker AND close IS NOT NULL
+            ORDER BY time DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        price_row = price_result.fetchone()
 
-        # RSI (14-period)
-        delta = df["close"].diff()
-        gain  = delta.where(delta > 0, 0.0).rolling(14).mean()
-        loss  = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
-        rs    = gain / loss.replace(0, float("nan"))
-        df["RSI"] = 100 - (100 / (1 + rs))
+        if not price_row:
+            return {
+                "score": 50,
+                "thesis": ["No price data available."],
+                "atr_14": latest.atr_14,
+            }
 
-        # MACD (12, 26, 9)
-        ema12     = df["close"].ewm(span=12, adjust=False).mean()
-        ema26     = df["close"].ewm(span=26, adjust=False).mean()
-        df["MACD"]        = ema12 - ema26
-        df["MACD_signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-        df["MACD_hist"]   = df["MACD"] - df["MACD_signal"]
+        price   = price_row.close
+        score   = 50
+        thesis  = []
 
-        latest  = df.iloc[-1]
-        prev    = df.iloc[-2] if len(df) > 1 else latest
-
-        score  = 50
-        thesis = []
-
-        price      = latest["close"]
-        sma_20     = latest["SMA_20"]
-        sma_50     = latest["SMA_50"]
-        sma_200    = latest["SMA_200"]
-        rsi        = latest["RSI"]
+        sma_20  = latest.sma_20
+        sma_50  = latest.sma_50
+        sma_200 = latest.sma_200
+        rsi     = latest.rsi_14
 
         # ── 1. Trend Structure ────────────────────────────────────────────────
-        if pd.notna(sma_200):
+        if sma_200 is not None:
             if price > sma_200:
                 score += 18
                 thesis.append("Long-term uptrend intact (price > 200-day SMA).")
@@ -85,7 +80,7 @@ class TechnicalAgent:
                 score -= 18
                 thesis.append("Below 200-day SMA — stock in long-term downtrend.")
 
-            if pd.notna(sma_50):
+            if sma_50 is not None:
                 if price > sma_50:
                     score += 12
                     if sma_50 > sma_200:
@@ -100,18 +95,15 @@ class TechnicalAgent:
                         thesis.append("Death Cross (50 SMA < 200 SMA) — confirmed downtrend.")
                     else:
                         thesis.append("Price below 50 SMA — medium-term momentum negative.")
-        else:
-            # < 200 days — use SMA_50 only
-            if pd.notna(sma_50):
-                if price > sma_50:
-                    score += 15
-                    thesis.append("Price above 50-day SMA (insufficient history for 200 SMA).")
-                else:
-                    score -= 10
-                    thesis.append("Price below 50-day SMA.")
+        elif sma_50 is not None:
+            if price > sma_50:
+                score += 15
+                thesis.append("Price above 50-day SMA (insufficient history for 200 SMA).")
+            else:
+                score -= 10
+                thesis.append("Price below 50-day SMA.")
 
-        # Short-term pulse: price vs 20 SMA
-        if pd.notna(sma_20):
+        if sma_20 is not None:
             if price > sma_20:
                 score += 4
                 thesis.append("Short-term pulse positive (price > 20-day SMA).")
@@ -120,14 +112,14 @@ class TechnicalAgent:
                 thesis.append("Short-term pulse negative (price < 20-day SMA).")
 
         # ── 2. MACD Signal ────────────────────────────────────────────────────
-        macd_now  = latest["MACD"]
-        macd_sig  = latest["MACD_signal"]
-        macd_prev = prev["MACD"]
-        macd_sp   = prev["MACD_signal"]
+        macd_now = latest.macd
+        macd_sig = latest.macd_signal
+        macd_prev_val = prev.macd
+        macd_prev_sig = prev.macd_signal
 
-        if pd.notna(macd_now) and pd.notna(macd_sig):
-            bullish_cross = (macd_now > macd_sig) and (macd_prev <= macd_sp)
-            bearish_cross = (macd_now < macd_sig) and (macd_prev >= macd_sp)
+        if macd_now is not None and macd_sig is not None:
+            bullish_cross = (macd_now > macd_sig) and (macd_prev_val is not None) and (macd_prev_val <= (macd_prev_sig or macd_sig))
+            bearish_cross = (macd_now < macd_sig) and (macd_prev_val is not None) and (macd_prev_val >= (macd_prev_sig or macd_sig))
 
             if bullish_cross:
                 score += 12
@@ -142,10 +134,10 @@ class TechnicalAgent:
                 score -= 6
                 thesis.append("MACD below signal line in negative territory — bearish momentum.")
             else:
-                thesis.append(f"MACD neutral (MACD={macd_now:.3f}, signal={macd_sig:.3f}).")
+                thesis.append(f"MACD neutral ({macd_now:.3f} vs signal {macd_sig:.3f}).")
 
         # ── 3. RSI ────────────────────────────────────────────────────────────
-        if pd.notna(rsi):
+        if rsi is not None:
             if rsi > 75:
                 score -= 12
                 thesis.append(f"RSI {rsi:.0f} — severely overbought. High reversal risk.")
@@ -164,61 +156,42 @@ class TechnicalAgent:
             else:
                 thesis.append(f"RSI {rsi:.0f} — neutral.")
 
-        # ── 4. Volume Surge ───────────────────────────────────────────────────
-        vols = df["volume"].dropna()
-        if len(vols) >= 20:
-            vol_5d  = vols.iloc[-5:].mean()
-            vol_20d = vols.iloc[-20:].mean()
-            if vol_20d > 0:
-                vol_ratio = vol_5d / vol_20d
-                if vol_ratio > 2.5:
-                    score += 12
-                    thesis.append(f"Volume explosion: {vol_ratio:.1f}× 20-day avg — strong institutional accumulation signal.")
-                elif vol_ratio > 1.5:
-                    score += 6
-                    thesis.append(f"Above-average volume: {vol_ratio:.1f}× 20-day avg — demand confirmation.")
-                elif vol_ratio < 0.5:
-                    score -= 5
-                    thesis.append(f"Volume drought: {vol_ratio:.1f}× 20-day avg — lack of conviction in the move.")
-                else:
-                    thesis.append(f"Volume normal: {vol_ratio:.1f}× 20-day avg.")
+        # ── 4. Volume Surge (pre-computed ratio) ──────────────────────────────
+        vol_ratio = latest.vol_ratio
+        if vol_ratio is not None:
+            if vol_ratio > 2.5:
+                score += 12
+                thesis.append(f"Volume explosion: {vol_ratio:.1f}× 20-day avg — strong institutional accumulation signal.")
+            elif vol_ratio > 1.5:
+                score += 6
+                thesis.append(f"Above-average volume: {vol_ratio:.1f}× 20-day avg — demand confirmation.")
+            elif vol_ratio < 0.5:
+                score -= 5
+                thesis.append(f"Volume drought: {vol_ratio:.1f}× 20-day avg — lack of conviction.")
+            else:
+                thesis.append(f"Volume normal: {vol_ratio:.1f}× 20-day avg.")
 
-        # ── 5. Relative Strength vs Index (63-day / ~3 months) ────────────────
-        # Fetch index price for comparison (SPY for US, ^NSEI proxy in macro_data)
-        try:
-            index_ticker = "^NSEI" if (".NS" in self.ticker or ".BO" in self.ticker) else "SPY"
-            idx_rows = await self.db.execute(text("""
-                SELECT close FROM stock_prices
-                WHERE ticker = :t AND close IS NOT NULL
-                ORDER BY time DESC LIMIT 64
-            """), {"t": index_ticker})
-            idx_prices = [r.close for r in idx_rows.fetchall()]
+        # ── 5. Relative Strength (pre-computed, 63-day) ───────────────────────
+        is_india = ".NS" in self.ticker or ".BO" in self.ticker
+        rs = latest.rs_vs_nsei if is_india else latest.rs_vs_spx
+        if rs is not None:
+            rs_delta_pct = (rs - 1.0) * 100  # convert ratio to % outperformance
+            if rs_delta_pct > 10:
+                score += 12
+                thesis.append(f"Strong relative strength: outperforming index by +{rs_delta_pct:.1f}% over 3 months.")
+            elif rs_delta_pct > 3:
+                score += 5
+                thesis.append(f"Mild relative outperformance vs index (+{rs_delta_pct:.1f}% over 3 months).")
+            elif rs_delta_pct < -10:
+                score -= 10
+                thesis.append(f"Underperforming index by {rs_delta_pct:.1f}% over 3 months — weak RS.")
+            elif rs_delta_pct < -3:
+                score -= 4
+                thesis.append(f"Slight underperformance vs index ({rs_delta_pct:.1f}% over 3 months).")
 
-            if len(idx_prices) >= 63 and len(df) >= 63:
-                # 63-day return
-                stock_ret = (df["close"].iloc[-1] - df["close"].iloc[-63]) / df["close"].iloc[-63]
-                idx_ret   = (idx_prices[0] - idx_prices[62]) / idx_prices[62]
-                rs_delta  = stock_ret - idx_ret
-
-                if rs_delta > 0.10:
-                    score += 12
-                    thesis.append(f"Strong relative strength: outperforming index by +{rs_delta*100:.1f}% over 3 months.")
-                elif rs_delta > 0.03:
-                    score += 5
-                    thesis.append(f"Mild relative outperformance vs index (+{rs_delta*100:.1f}% over 3 months).")
-                elif rs_delta < -0.10:
-                    score -= 10
-                    thesis.append(f"Underperforming index by {rs_delta*100:.1f}% over 3 months — weak RS.")
-                elif rs_delta < -0.03:
-                    score -= 4
-                    thesis.append(f"Slight underperformance vs index ({rs_delta*100:.1f}% over 3 months).")
-        except Exception:
-            pass  # Index data unavailable — skip RS check silently
-
-        # ── 6. Breakout Proximity (52-week high) ───────────────────────────────
-        closes_52w = df["close"].iloc[-252:] if len(df) >= 252 else df["close"]
-        high_52w   = closes_52w.max()
-        if high_52w > 0:
+        # ── 6. Breakout Proximity (52-week high, pre-computed) ────────────────
+        high_52w = latest.week_52_high
+        if high_52w and high_52w > 0:
             proximity = price / high_52w
             if proximity >= 0.98:
                 score += 10
@@ -230,8 +203,102 @@ class TechnicalAgent:
                 score -= 6
                 thesis.append(f"Far from 52-week high ({proximity*100:.0f}%) — stock in deep correction.")
 
-        score = max(0, min(100, score))
-        logger.info("TechnicalAgent %s: score=%d price=%.2f RSI=%.1f",
-                    self.ticker, score, price, rsi if pd.notna(rsi) else -1)
+        # Bollinger Band context (informational)
+        if latest.bb_upper is not None and latest.bb_lower is not None:
+            bb_range = latest.bb_upper - latest.bb_lower
+            if bb_range > 0:
+                bb_pos = (price - latest.bb_lower) / bb_range
+                if bb_pos > 0.95:
+                    score -= 3
+                    thesis.append("Price at upper Bollinger Band — potential short-term resistance.")
+                elif bb_pos < 0.05:
+                    score += 3
+                    thesis.append("Price at lower Bollinger Band — potential mean-reversion opportunity.")
 
-        return {"score": score, "thesis": thesis}
+        # ── 7. Mean Reversion Signals (new columns) ───────────────────────────
+        # Get extended columns if available
+        tech_ext = await self.db.execute(text("""
+            SELECT vwap, bb_bandwidth, bb_squeeze, price_zscore_20d,
+                   fib_high_50d, fib_low_50d, fib_382, fib_618, fib_pct_pos
+            FROM stock_technicals
+            WHERE ticker = :ticker
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        ext = tech_ext.fetchone()
+
+        if ext:
+            # VWAP
+            if ext.vwap and price:
+                if price > ext.vwap * 1.02:
+                    score += 4
+                    thesis.append(f"Price above VWAP (${ext.vwap:.2f}) — institutional demand zone confirmed.")
+                elif price < ext.vwap * 0.98:
+                    score -= 4
+                    thesis.append(f"Price below VWAP (${ext.vwap:.2f}) — selling pressure dominant.")
+
+            # Bollinger Squeeze — coiled spring, imminent breakout
+            if ext.bb_squeeze:
+                thesis.append("Bollinger Squeeze active — volatility compression signals imminent breakout.")
+
+            # Price z-score — mean reversion
+            if ext.price_zscore_20d is not None:
+                z = ext.price_zscore_20d
+                if z > 2.0:
+                    score -= 6
+                    thesis.append(f"Price z-score +{z:.1f}σ — extended above 20-day mean. Reversion risk.")
+                elif z < -2.0:
+                    score += 6
+                    thesis.append(f"Price z-score {z:.1f}σ — deeply below mean. Mean-reversion opportunity.")
+                elif z < -1.0:
+                    score += 3
+                    thesis.append(f"Price z-score {z:.1f}σ — below mean. Mild mean-reversion setup.")
+
+            # Fibonacci position
+            if ext.fib_pct_pos is not None and ext.fib_382 is not None and ext.fib_618 is not None:
+                fp = ext.fib_pct_pos
+                if 0.36 <= fp <= 0.40:
+                    score += 5
+                    thesis.append(f"Price at 38.2% Fibonacci support (${ext.fib_382:.2f}) — key retracement level.")
+                elif 0.60 <= fp <= 0.64:
+                    score += 7
+                    thesis.append(f"Price at 61.8% Fibonacci support (golden ratio ${ext.fib_618:.2f}) — high-probability bounce zone.")
+                elif fp > 0.92:
+                    score += 4
+                    thesis.append(f"Price near 52-week Fibonacci high — strong breakout momentum.")
+                elif fp < 0.15:
+                    score -= 5
+                    thesis.append(f"Price near Fibonacci low ({fp*100:.0f}% of range) — deep correction.")
+
+        # ── 8. Candlestick Pattern ────────────────────────────────────────────
+        candle_result = await self.db.execute(text("""
+            SELECT dominant, signal, pattern_count
+            FROM candlestick_patterns
+            WHERE ticker = :ticker
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": self.ticker})
+        candle = candle_result.fetchone()
+
+        if candle and candle.dominant:
+            if candle.signal == "REVERSAL_UP":
+                score += 10
+                thesis.append(f"Candlestick: {candle.dominant} — bullish reversal pattern detected.")
+            elif candle.signal == "BULLISH":
+                score += 5
+                thesis.append(f"Candlestick: {candle.dominant} — bullish continuation signal.")
+            elif candle.signal == "REVERSAL_DOWN":
+                score -= 10
+                thesis.append(f"Candlestick: {candle.dominant} — bearish reversal pattern detected.")
+            elif candle.signal == "BEARISH":
+                score -= 5
+                thesis.append(f"Candlestick: {candle.dominant} — bearish continuation signal.")
+
+        score = max(0, min(100, score))
+        logger.info("TechnicalAgent %s: score=%d price=%.2f RSI=%s",
+                    self.ticker, score, price,
+                    f"{rsi:.1f}" if rsi is not None else "n/a")
+
+        return {"score": score, "thesis": thesis, "atr_14": latest.atr_14,
+                "bb_squeeze": bool(ext.bb_squeeze) if ext and ext.bb_squeeze else False,
+                "price_zscore": float(ext.price_zscore_20d) if ext and ext.price_zscore_20d else None,
+                "fib_pct_pos": float(ext.fib_pct_pos) if ext and ext.fib_pct_pos else None,
+                "candlestick_signal": candle.signal if candle else None}

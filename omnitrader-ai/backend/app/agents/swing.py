@@ -44,14 +44,25 @@ class SwingTradeAgent:
         df.set_index("Date", inplace=True)
         return df
 
-    def _calculate_atr(self, df: pd.DataFrame, period=14) -> float:
-        """Calculates Average True Range."""
+    async def _get_atr(self, df: pd.DataFrame) -> float:
+        """ATR-14 from pre-computed stock_technicals; falls back to raw calculation."""
+        try:
+            result = await self.db.execute(text("""
+                SELECT atr_14 FROM stock_technicals
+                WHERE ticker = :ticker AND atr_14 IS NOT NULL
+                ORDER BY date DESC LIMIT 1
+            """), {"ticker": self.ticker})
+            row = result.fetchone()
+            if row and row.atr_14:
+                return float(row.atr_14)
+        except Exception:
+            pass
+        # Fallback: compute from raw OHLCV
         high_low = df['High'] - df['Low']
         high_close = (df['High'] - df['Close'].shift()).abs()
         low_close = (df['Low'] - df['Close'].shift()).abs()
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = ranges.max(axis=1)
-        return true_range.rolling(period).mean().iloc[-1]
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return float(true_range.rolling(14).mean().iloc[-1])
 
     def _generate_chart(self, df: pd.DataFrame, stop_loss: float, take_profit: float) -> str:
         """Draws the visual chart with support/resistance lines and saves it."""
@@ -154,7 +165,7 @@ class SwingTradeAgent:
         current_price = df['Close'].iloc[-1]
         
         # Risk Management Math (2x ATR Stop Loss, 3:1 Reward/Risk)
-        atr = self._calculate_atr(df)
+        atr = await self._get_atr(df)
         stop_loss = current_price - (atr * 2)
         risk_per_share = current_price - stop_loss
         take_profit = current_price + (risk_per_share * 3)

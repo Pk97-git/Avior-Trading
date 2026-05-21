@@ -2,16 +2,19 @@
 OmniTrader AI — FastAPI Application
 =====================================
 Startup lifecycle:
-  1. On boot → check if stock_prices has < 100 rows → auto-trigger initial load
-  2. Schedule prices_intraday_flow()  5× per weekday (6:30, 8:00, 14:00, 17:30, 20:30 UTC)
-  3. Schedule prices_india_eod_flow() at 10:45 UTC weekdays (45 min after NSE close)
-  4. Schedule prices_us_eod_flow()    at 21:00 UTC weekdays (30 min after NYSE close)
-  5. Schedule daily_ingest_flow()     at 22:00 UTC weekdays (macro/sentiment/snapshots)
-  6. Schedule agents_daily_flow()     at 23:00 UTC weekdays (full agent batch scoring)
-  7. Schedule swing_trading_flow()    at 00:30 UTC weekdays (proactive swing setups)
-  8. Schedule weekly_ingest_flow()    every Sunday at 02:00 UTC
-  9. Schedule walk_forward_run()      every Sunday at 03:00 UTC (signal quality validation)
- 10. Schedule monthly_ingest_flow()   at 03:00 UTC on 1st of every month (13F, promoter)
+  1. On boot → run schema migrations (safe ALTER TABLE ADD COLUMN IF NOT EXISTS)
+  2. Check if stock_prices < 100 rows → auto-trigger full historical load
+  3. Schedule prices_intraday_flow()        5× per weekday (6:30, 8:00, 14:00, 17:30, 20:30 UTC)
+  4. Schedule prices_india_eod_flow()       at 10:45 UTC weekdays (45 min after NSE close)
+  5. Schedule prices_us_eod_flow()          at 21:00 UTC weekdays (30 min after NYSE close)
+  6. Schedule prices_nightly_gap_fill_flow() at 00:00 UTC daily (auto-backfill gaps/new IPOs)
+  7. Schedule daily_ingest_flow()           at 22:00 UTC weekdays (macro/sentiment/snapshots)
+  8. Schedule agents_daily_flow()           at 23:00 UTC weekdays (full agent batch scoring)
+  9. Schedule swing_trading_flow()          at 00:30 UTC weekdays (proactive swing setups)
+ 10. Schedule weekly_ingest_flow()          every Sunday at 02:00 UTC
+ 11. Schedule walk_forward_run()            every Sunday at 03:00 UTC (signal quality validation)
+ 12. Schedule monthly_ingest_flow()         at 03:00 UTC on 1st of every month (13F, promoter)
+ 13. Schedule run_trailing_stops()          every hour on weekdays (ratchet stop-losses)
 """
 import asyncio
 import logging
@@ -24,6 +27,36 @@ from apscheduler.triggers.cron import CronTrigger
 from app.core.config import settings
 from app.api import ingestion, agents
 from app.api import signals as signals_router
+from app.api import watchlist as watchlist_router
+from app.api import backtest as backtest_router
+from app.api import portfolio as portfolio_router
+from app.api import circuit_breaker as circuit_breaker_router
+from app.api import prices_sse as prices_sse_router
+from app.api import orders as orders_router
+from app.api import trailing_stops as trailing_stops_router
+from app.api import sectors as sectors_router
+from app.api import risk as risk_router
+from app.api import earnings as earnings_router
+from app.api import options as options_router
+from app.api import briefing as briefing_router
+from app.api import insiders as insiders_router
+from app.api import analysts as analysts_router
+from app.api import economic_calendar as economic_calendar_router
+from app.api import analytics as analytics_router
+from app.api import research as research_router
+from app.api import goals as goals_router
+from app.api import tax as tax_router
+from app.api import rebalance as rebalance_router
+from app.api import copilot as copilot_router
+from app.api import alerts_automation as alerts_automation_router
+from app.api import intelligence as intelligence_router
+from app.api import charts as charts_router
+from app.api import ai as ai_router
+from app.api import predictions as predictions_router
+from app.api import notification_prefs as notification_prefs_router
+from app.api import patterns as patterns_router
+from app.api import screener as screener_router
+from app.api import broker_connect as broker_connect_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -48,6 +81,40 @@ async def run_prices_us_eod():
     logger.info("[Scheduler] Starting prices_us_eod_flow...")
     from app.flows.prices_flow import prices_us_eod_flow
     await prices_us_eod_flow()
+
+async def run_prices_gap_fill():
+    logger.info("[Scheduler] Starting prices_nightly_gap_fill_flow...")
+    from app.flows.prices_flow import prices_nightly_gap_fill_flow
+    await prices_nightly_gap_fill_flow()
+
+
+# ── Intraday 15m bar refresh ───────────────────────────────────────────────────
+
+async def run_intraday_india():
+    logger.info("[Scheduler] Intraday India 15m refresh...")
+    from app.flows.intraday_flow import intraday_india_flow
+    await intraday_india_flow()
+
+async def run_intraday_us():
+    logger.info("[Scheduler] Intraday US 15m refresh...")
+    from app.flows.intraday_flow import intraday_us_flow
+    await intraday_us_flow()
+
+
+# ── US options chain (daily after close) ──────────────────────────────────────
+
+async def run_us_options_daily():
+    logger.info("[Scheduler] US options chain snapshot...")
+    from app.flows.us_options_flow import us_options_daily_flow
+    await us_options_daily_flow()
+
+
+# ── NSE F&O option chain snapshots ────────────────────────────────────────────
+
+async def run_fo_chain():
+    logger.info("[Scheduler] NSE F&O chain snapshot...")
+    from app.flows.fo_chain_flow import fo_chain_flow
+    await fo_chain_flow()
 
 
 # ── Ingestion flows ────────────────────────────────────────────────────────────
@@ -90,6 +157,16 @@ async def run_swing():
     logger.info("[Scheduler] swing_trading_flow complete.")
 
 
+async def run_health_check():
+    logger.info("[Scheduler] Running data freshness health check...")
+    from app.services.health_monitor import HealthMonitor
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        monitor = HealthMonitor(db)
+        result = await monitor.run_checks()
+        logger.info("[Scheduler] Health check: %s — %s", result["status"], result.get("warnings", []))
+
+
 async def walk_forward_run():
     logger.info("[Scheduler] Starting WalkForwardValidator...")
     from app.agents.validator import WalkForwardValidator
@@ -98,6 +175,84 @@ async def walk_forward_run():
         validator = WalkForwardValidator(db)
         result = await validator.run()
         logger.info("[Scheduler] WalkForwardValidator result: %s", result)
+
+
+async def run_trailing_stops():
+    logger.info("[Scheduler] Running trailing stop updates...")
+    from app.services.trailing_stops import TrailingStopService
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        svc = TrailingStopService(db)
+        result = await svc.run()
+        exits = result.get("needs_exit", [])
+        if exits:
+            logger.warning("[Scheduler] %d positions breached stop loss: %s",
+                          len(exits), [e["ticker"] for e in exits])
+        logger.info("[Scheduler] Trailing stops: %d updated, %d need exit.",
+                   len(result.get("updated", [])), len(exits))
+
+
+async def run_smart_alerts():
+    """Run smart alert engine — check all active AlertRules."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.engines.smart_alerts import SmartAlertEngine
+        async with AsyncSessionLocal() as db:
+            engine = SmartAlertEngine(db)
+            result = await engine.run_all_checks()
+            logger.info("[SmartAlerts] Checked %d rules, fired %d alerts",
+                       result.get("checked", 0), result.get("fired", 0))
+    except Exception as exc:
+        logger.warning("[SmartAlerts] run failed: %s", exc)
+
+
+async def run_automation_rules():
+    """Run automation engine — execute due AutomationRules."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.engines.automation import AutomationEngine
+        async with AsyncSessionLocal() as db:
+            engine = AutomationEngine(db)
+            result = await engine.run_all_rules()
+            logger.info("[Automation] Executed %d rules", result.get("executed", 0))
+    except Exception as exc:
+        logger.warning("[Automation] run failed: %s", exc)
+
+
+async def run_trade_scan():
+    """Scheduled job: scan market for trade opportunities."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            from app.engines.trade_scanner import TradeScanner
+            scanner = TradeScanner(db)
+            result = await scanner.run_scan()
+            logger.info("[Scheduler] Trade scan complete: %s", result)
+    except Exception as exc:
+        logger.error("[Scheduler] Trade scan failed: %s", exc)
+
+
+async def run_morning_brief():
+    """Send daily morning brief at 7:00 AM IST (01:30 UTC) on weekdays."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.services.notifications import NotificationService
+        from app.api.notification_prefs import _get_prefs
+        async with AsyncSessionLocal() as db:
+            prefs = _get_prefs()
+            if not prefs.enabled:
+                logger.info("[MorningBrief] Notifications disabled — skipping.")
+                return
+            svc = NotificationService()
+            result = await svc.send_morning_brief(
+                db=db,
+                override_email=prefs.email_address if prefs.email_enabled else None,
+                override_telegram_token=prefs.telegram_bot_token if prefs.telegram_enabled else None,
+                override_telegram_chat_id=prefs.telegram_chat_id if prefs.telegram_enabled else None,
+            )
+            logger.info("[MorningBrief] %s", result)
+    except Exception as exc:
+        logger.error("[MorningBrief] Failed: %s", exc)
 
 
 async def check_and_run_initial_load():
@@ -128,6 +283,28 @@ async def check_and_run_initial_load():
 async def lifespan(app: FastAPI):
     logger.info("OmniTrader AI starting up...")
 
+    # ── Run schema migrations (safe, idempotent) ───────────────────────────────
+    try:
+        from app.db.init_db import run_migrations
+        from app.db.session import engine
+        from app.db.base import Base
+        from app.models.market_data import (  # noqa: F401 — ensure all models registered
+            Stock, StockPrice, CompanyFinancials, MacroEconomicData, MarketSnapshot,
+            NewsSentiment, InstitutionalFlow, PromoterHolding, RegimeLabel,
+            ChartSnapshot, AIAnalysis, Alert, Watchlist, PortfolioPosition, Order,
+            InsiderTransaction, AnalystRating, StockTechnicals, ShortInterest, Dividend,
+            IntradayPrice, FoChainSnapshot, CorporateAction, MutualFundNav, MutualFundHolding,
+            SecFiling, UsOptionsSnapshot, RbiAnnouncement, GoogleTrendsData,
+            ValuationMetrics, CandlestickPattern, EarningsTranscript, PairTrade,
+            InvestmentGoal,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await run_migrations()
+        logger.info("[Boot] Schema up to date.")
+    except Exception as e:
+        logger.error("[Boot] Schema migration failed: %s", e)
+
     # ── Intraday price refresh: 5× per weekday ─────────────────────────────────
     for hour, minute in [(6, 30), (8, 0), (14, 0), (17, 30), (20, 30)]:
         scheduler.add_job(
@@ -142,6 +319,40 @@ async def lifespan(app: FastAPI):
                       id="prices_india_eod", replace_existing=True)
     scheduler.add_job(run_prices_us_eod, CronTrigger(hour=21, minute=0, day_of_week="mon-fri"),
                       id="prices_us_eod", replace_existing=True)
+
+    # ── Nightly gap fill: runs at midnight UTC every day ──────────────────────
+    scheduler.add_job(run_prices_gap_fill, CronTrigger(hour=0, minute=0),
+                      id="prices_gap_fill", replace_existing=True)
+
+    # ── Intraday 15m bars: India session (03:45–10:00 UTC) ────────────────────
+    for hour, minute in [(4, 0), (6, 0), (8, 0), (10, 15)]:
+        scheduler.add_job(
+            run_intraday_india,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            id=f"intraday_india_{hour:02d}{minute:02d}",
+            replace_existing=True,
+        )
+
+    # ── Intraday 15m bars: US session (14:30–21:00 UTC) ───────────────────────
+    for hour, minute in [(14, 45), (17, 0), (19, 0), (21, 15)]:
+        scheduler.add_job(
+            run_intraday_us,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            id=f"intraday_us_{hour:02d}{minute:02d}",
+            replace_existing=True,
+        )
+
+    # ── NSE F&O OI chain: every 15 min during NSE session (04:00–10:00 UTC) ──
+    scheduler.add_job(
+        run_fo_chain,
+        CronTrigger(minute="*/15", hour="4-10", day_of_week="mon-fri"),
+        id="fo_chain_snapshot",
+        replace_existing=True,
+    )
+
+    # ── US options chain: daily after US close (21:30 UTC) ────────────────────
+    scheduler.add_job(run_us_options_daily, CronTrigger(hour=21, minute=30, day_of_week="mon-fri"),
+                      id="us_options_daily", replace_existing=True)
 
     # ── Daily ingestion pipeline ───────────────────────────────────────────────
     scheduler.add_job(run_daily, CronTrigger(hour=22, minute=0, day_of_week="mon-fri"),
@@ -163,18 +374,58 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_monthly, CronTrigger(day=1, hour=3, minute=0),
                       id="monthly_ingest", replace_existing=True)
 
+    # ── Operational health check: 06:00 UTC daily ──────────────────────────────
+    scheduler.add_job(run_health_check, CronTrigger(hour=6, minute=0),
+                      id="health_check", replace_existing=True)
+
+    # ── Trailing stops: every hour on weekdays ─────────────────────────────────
+    scheduler.add_job(run_trailing_stops, CronTrigger(minute=0, day_of_week="mon-fri"),
+                      id="trailing_stops", replace_existing=True)
+
+    # ── Smart alerts: every 15 min on weekdays ─────────────────────────────────
+    scheduler.add_job(run_smart_alerts,    CronTrigger(minute="*/15", day_of_week="mon-fri"),
+                      id="smart_alerts",   replace_existing=True)
+
+    # ── Automation rules: every 30 min ─────────────────────────────────────────
+    scheduler.add_job(run_automation_rules, CronTrigger(minute="*/30"),
+                      id="automation_rules", replace_existing=True)
+
+    # ── Trade Intelligence scan: 8:30 AM and 2:30 PM weekdays ─────────────────
+    scheduler.add_job(
+        run_trade_scan,
+        CronTrigger(hour="8,14", minute="30", day_of_week="mon-fri"),
+        id="trade_scan",
+        replace_existing=True,
+    )
+
+    # ── Morning brief: 01:30 UTC = 7:00 AM IST every weekday ──────────────────
+    scheduler.add_job(
+        run_morning_brief,
+        CronTrigger(hour=1, minute=30, day_of_week="mon-fri"),
+        id="morning_brief",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "[Scheduler] Jobs registered:\n"
         "  Intraday prices:  6:30, 8:00, 14:00, 17:30, 20:30 UTC (weekdays)\n"
         "  India EOD:        10:45 UTC weekdays\n"
         "  US EOD:           21:00 UTC weekdays\n"
+        "  Nightly gap fill: 00:00 UTC daily\n"
+        "  Intraday 15m IN:  04:00, 06:00, 08:00, 10:15 UTC (weekdays)\n"
+        "  Intraday 15m US:  14:45, 17:00, 19:00, 21:15 UTC (weekdays)\n"
+        "  F&O OI chain:     every 15 min, 04:00-10:00 UTC (weekdays)\n"
+        "  US options chain: 21:30 UTC weekdays\n"
         "  Daily ingest:     22:00 UTC weekdays\n"
         "  Agent scoring:    23:00 UTC weekdays\n"
         "  Swing screener:   00:30 UTC weekdays\n"
         "  Weekly refresh:   Sun 02:00 UTC\n"
         "  Walk-forward:     Sun 03:00 UTC\n"
-        "  Monthly 13F:      1st of month 03:00 UTC"
+        "  Monthly 13F:      1st of month 03:00 UTC\n"
+        "  Trailing stops:   hourly weekdays\n"
+        "  Smart alerts:    every 15 min (weekdays)\n"
+        "  Automation:      every 30 min\n"
     )
 
     asyncio.create_task(check_and_run_initial_load())
@@ -194,8 +445,38 @@ app = FastAPI(
 )
 
 app.include_router(ingestion.router)
-app.include_router(agents.router,         prefix="/api/v1/agents", tags=["agents"])
-app.include_router(signals_router.router, prefix="/api/v1/agents", tags=["signals"])
+app.include_router(agents.router,              prefix="/api/v1/agents",    tags=["agents"])
+app.include_router(signals_router.router,      prefix="/api/v1/agents",    tags=["signals"])
+app.include_router(watchlist_router.router,    prefix="/api/v1/watchlist", tags=["watchlist"])
+app.include_router(backtest_router.router,     prefix="/api/v1/backtest",  tags=["backtest"])
+app.include_router(portfolio_router.router,        prefix="/api/v1/portfolio",        tags=["portfolio"])
+app.include_router(circuit_breaker_router.router,  prefix="/api/v1/circuit-breaker",  tags=["circuit-breaker"])
+app.include_router(prices_sse_router.router,       prefix="/api/v1/prices",           tags=["prices"])
+app.include_router(orders_router.router,           prefix="/api/v1/orders",           tags=["orders"])
+app.include_router(trailing_stops_router.router,   prefix="/api/v1/trailing-stops",   tags=["trailing-stops"])
+app.include_router(sectors_router.router,          prefix="/api/v1/sectors",           tags=["sectors"])
+app.include_router(risk_router.router,             prefix="/api/v1/risk",              tags=["risk"])
+app.include_router(earnings_router.router,         prefix="/api/v1/earnings",          tags=["earnings"])
+app.include_router(options_router.router,          prefix="/api/v1/options",           tags=["options"])
+app.include_router(briefing_router.router,         prefix="/api/v1/briefing",          tags=["briefing"])
+app.include_router(insiders_router.router,         prefix="/api/v1/insiders",           tags=["insiders"])
+app.include_router(analysts_router.router,         prefix="/api/v1/analysts",           tags=["analysts"])
+app.include_router(economic_calendar_router.router, prefix="/api/v1/economic-calendar", tags=["economic-calendar"])
+app.include_router(analytics_router.router)  # prefix already set in router (/api/analytics)
+app.include_router(research_router.router)   # prefix already set in router (/api/v1/research)
+app.include_router(goals_router.router)
+app.include_router(tax_router.router)        # prefix already set in router (/api/v1/tax)
+app.include_router(rebalance_router.router)  # prefix already set in router (/api/v1/rebalance)
+app.include_router(copilot_router.router,      prefix="/api/v1/copilot",      tags=["copilot"])
+app.include_router(alerts_automation_router.router, prefix="/api/v1/automation", tags=["automation"])
+app.include_router(intelligence_router.router, prefix="/api/v1/intelligence", tags=["intelligence"])
+app.include_router(charts_router.router, prefix="/api/v1/charts", tags=["charts"])
+app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["ai"])
+app.include_router(predictions_router.router, prefix="/api/v1/predictions", tags=["predictions"])
+app.include_router(notification_prefs_router.router, prefix="/api/v1/notifications", tags=["notifications"])
+app.include_router(patterns_router.router,          prefix="/api/v1/patterns",      tags=["patterns"])
+app.include_router(screener_router.router,          prefix="/api/v1/screener",      tags=["screener"])
+app.include_router(broker_connect_router.router,   prefix="/api/v1/broker",        tags=["broker"])
 
 import os
 from fastapi.staticfiles import StaticFiles

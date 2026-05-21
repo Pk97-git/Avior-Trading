@@ -10,13 +10,13 @@ Handles:
 import asyncio
 import feedparser
 import requests
+import re
 import os
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models.market_data import NewsSentiment
 from datetime import datetime
 from typing import List, Dict, Optional
-import re
 
 
 # ─── LLM Sentiment Scorer ────────────────────────────────────────────────────
@@ -174,6 +174,7 @@ RSS_FEEDS = {
 class SentimentService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._scorer = LLMSentimentScorer()  # uses LLM if API key set, else rule-based
 
     async def _upsert_sentiment(self, records: List[Dict]):
         if not records:
@@ -234,7 +235,7 @@ class SentimentService:
                         continue
 
                     pub_dt = datetime(*published[:6]) if published else datetime.utcnow()
-                    score = self._simple_sentiment_score(title)
+                    score, confidence = self._scorer.score(title)
                     tickers = self._extract_tickers_from_text(title, known_tickers)
 
                     for ticker in tickers[:1]:  # One record per headline
@@ -245,7 +246,7 @@ class SentimentService:
                             "source": source_name,
                             "url": link[:500],
                             "sentiment_score": score,
-                            "confidence": 0.5,  # Rule-based = medium confidence
+                            "confidence": confidence,
                         })
 
             except Exception as e:
@@ -283,7 +284,7 @@ class SentimentService:
                         continue
 
                     pub_dt = datetime.utcfromtimestamp(created)
-                    sentiment = self._simple_sentiment_score(title)
+                    sentiment, _conf = self._scorer.score(title)
 
                     # Map to the US or India index so it satisfies the TimescaleDB FK Constraint 
                     # instead of the illegal text 'MARKET'
@@ -350,3 +351,81 @@ class SentimentService:
 
         await self._upsert_sentiment(records)
         print(f"  Ingested {len(records)} Stocktwits sentiment records")
+
+    async def fetch_yahoo_finance_news(self, tickers: List[str]):
+        """Fetch Yahoo Finance news for specific tickers — covers small/mid caps."""
+        import yfinance as yf
+
+        records = []
+        loop = asyncio.get_event_loop()
+
+        for ticker in tickers[:50]:  # limit to 50 per call
+            try:
+                def _fetch(t=ticker):
+                    stock = yf.Ticker(t)
+                    return stock.news  # list of dicts with title, publisher, link, providerPublishTime
+
+                news_items = await loop.run_in_executor(None, _fetch)
+                if not news_items:
+                    continue
+
+                for item in news_items[:5]:  # top 5 per ticker
+                    title = item.get("title", "")
+                    if not title:
+                        continue
+                    pub_time = item.get("providerPublishTime", 0)
+                    pub_dt = datetime.utcfromtimestamp(pub_time) if pub_time else datetime.utcnow()
+                    score, confidence = self._scorer.score(title)
+
+                    records.append({
+                        "time": pub_dt,
+                        "ticker": ticker,
+                        "headline": title[:500],
+                        "source": f"Yahoo_{item.get('publisher', 'Finance')}",
+                        "url": item.get("link", "")[:500],
+                        "sentiment_score": score,
+                        "confidence": confidence,
+                    })
+            except Exception as e:
+                print(f"  [WARN] Yahoo news {ticker}: {e}")
+
+        await self._upsert_sentiment(records)
+        print(f"  Yahoo Finance: ingested {len(records)} records for {len(tickers)} tickers")
+
+    async def fetch_finviz_news(self, tickers: List[str]):
+        """Scrape FinViz news for ticker-specific headlines."""
+        records = []
+        loop = asyncio.get_event_loop()
+
+        for ticker in tickers[:30]:  # limit requests
+            try:
+                url = f"https://finviz.com/quote.ashx?t={ticker}"
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; OmniTrader/1.0)"}
+
+                def _scrape(t=ticker, u=url):
+                    resp = requests.get(u, headers=headers, timeout=8)
+                    if resp.status_code != 200:
+                        return []
+                    # Parse news table: anchor tags with class "tab-link-news"
+                    titles = re.findall(r'<a[^>]+class="tab-link-news"[^>]*>([^<]+)</a>', resp.text)
+                    return titles[:5]
+
+                titles = await loop.run_in_executor(None, _scrape)
+                for title in titles:
+                    score, confidence = self._scorer.score(title)
+                    records.append({
+                        "time": datetime.utcnow(),
+                        "ticker": ticker,
+                        "headline": title[:500],
+                        "source": "FinViz",
+                        "url": f"https://finviz.com/quote.ashx?t={ticker}",
+                        "sentiment_score": score,
+                        "confidence": confidence,
+                    })
+            except Exception as e:
+                print(f"  [WARN] FinViz {ticker}: {e}")
+
+            await asyncio.sleep(0.5)  # polite rate limiting
+
+        await self._upsert_sentiment(records)
+        print(f"  FinViz: ingested {len(records)} records for {len(tickers)} tickers")
