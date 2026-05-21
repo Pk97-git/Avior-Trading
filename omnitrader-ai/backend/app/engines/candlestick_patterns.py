@@ -989,6 +989,25 @@ class CandlestickPatternEngine:
             "neutral": [p for p in recent if p["bias"] == "NEUTRAL"],
         }
 
+    @staticmethod
+    def list_all_patterns() -> list[dict]:
+        """Return all pattern metadata from the registry (no OHLCV data needed)."""
+        return [
+            {
+                "code":             p.code,
+                "name":             p.name,
+                "bias":             p.bias.value,
+                "category":         p.category.value,
+                "strength":         p.strength,
+                "reliability_pct":  p.reliability_pct,
+                "description":      p.description,
+                "entry_suggestion": p.entry_suggestion,
+                "stop_suggestion":  p.stop_suggestion,
+                "emoji":            p.emoji,
+            }
+            for p in PATTERN_REGISTRY
+        ]
+
 
 def detect_patterns(df: pd.DataFrame, lookback: int = 60) -> list[dict]:
     """Convenience function — instantiate engine and detect all patterns."""
