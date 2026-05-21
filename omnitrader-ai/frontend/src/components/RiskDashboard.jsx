@@ -160,7 +160,7 @@ function RsTable({ data, loading }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function RiskDashboard() {
+export default function RiskDashboard({ onNavigate }) {
     const [risk, setRisk]           = useState(null);
     const [corr, setCorr]           = useState(null);
     const [rs, setRs]               = useState([]);
@@ -407,6 +407,20 @@ export default function RiskDashboard() {
                     Expected Shortfall (CVaR 95%): {fmtCcy(risk.cvar_95)} — mean loss in worst 5% of days over 90-day window.
                 </p>
             )}
+
+            {/* ── Stress Test CTA ── */}
+            <div className="flex items-center justify-between rounded-lg border border-border bg-card/50 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <AlertCircle size={14} className="text-yellow-400" />
+                    Want to see how your portfolio holds up in a market crash?
+                </div>
+                <button
+                    onClick={() => onNavigate?.('stress-test')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
+                >
+                    Run Full Stress Test →
+                </button>
+            </div>
         </div>
     );
 }

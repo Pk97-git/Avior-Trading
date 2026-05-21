@@ -3,7 +3,7 @@ import {
     LayoutDashboard, Database, Activity, Settings, Globe, Zap,
     Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase,
     ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper, Users,
-    Menu, X, BookOpen, Filter, GitCompare, Calculator,
+    Menu, X, BookOpen, Filter, GitCompare, Calculator, TrendingDown,
 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
@@ -33,6 +33,7 @@ import Screener from './components/Screener';
 import PairsTrading from './components/PairsTrading';
 import PositionSizerPanel from './components/PositionSizer';
 import StressTest from './components/StressTest';
+import FactorExposure from './components/FactorExposure';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -53,6 +54,8 @@ const TABS = [
     { id: 'sectors',      label: 'Sector Rotation',     icon: BarChart },
     // ── Risk & Analytics ──────────────────────────────────────
     { id: 'risk',            label: 'Risk Dashboard',   icon: ShieldAlert },
+    { id: 'factors',         label: 'Factor Exposure',  icon: Layers },
+    { id: 'shorts',          label: 'Short Candidates', icon: TrendingDown },
     { id: 'position-sizer',  label: 'Position Sizer',   icon: Calculator },
     { id: 'stress-test',     label: 'Stress Test',      icon: ShieldAlert },
     { id: 'performance',     label: 'Signal Performance', icon: BarChart2 },
@@ -86,7 +89,7 @@ const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
-    { label: 'Risk & Analytics', ids: ['risk', 'position-sizer', 'stress-test', 'performance', 'backtest'] },
+    { label: 'Risk & Analytics', ids: ['risk', 'factors', 'shorts', 'position-sizer', 'stress-test', 'performance', 'backtest'] },
     { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns', 'pairs'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
@@ -255,7 +258,11 @@ export default function App() {
                     {activeTab === 'analysts'    && <AnalystRatings onNavigate={handleNavigate} />}
                     {activeTab === 'econCalendar' && <EconomicCalendar />}
                     {activeTab === 'sectors'     && <SectorRotation />}
-                    {activeTab === 'risk'        && <RiskDashboard />}
+                    {activeTab === 'risk'           && <RiskDashboard onNavigate={handleNavigate} />}
+                    {activeTab === 'factors'        && <FactorExposure view="factors" />}
+                    {activeTab === 'shorts'         && <FactorExposure view="shorts" />}
+                    {activeTab === 'position-sizer' && <PositionSizerPanel />}
+                    {activeTab === 'stress-test'    && <StressTest onNavigate={handleNavigate} />}
                     {activeTab === 'performance' && <SignalPerformance />}
                     {activeTab === 'backtest'    && <Backtest />}
                     {activeTab === 'screener'    && <Screener onNavigate={handleNavigate} />}
