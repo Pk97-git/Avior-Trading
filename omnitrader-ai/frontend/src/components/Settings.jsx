@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { agentsApi } from '../api';
 import { Loader2, RefreshCw, CheckCircle2, XCircle, Clock, Database, Key, Bell } from 'lucide-react';
+import NotificationSettings from './NotificationSettings';
 
 function StatusDot({ ok }) {
     return ok
@@ -80,6 +81,15 @@ export default function Settings() {
 
     return (
         <div className="space-y-6 max-w-4xl">
+
+            {/* ── Morning Brief ── */}
+            <div className="rounded-xl border border-slate-700/60 bg-slate-800/30 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                    <Bell className="h-4 w-4 text-sky-400" />
+                    <h3 className="font-semibold text-slate-100">Morning Notifications</h3>
+                </div>
+                <NotificationSettings />
+            </div>
 
             {/* ── Header ── */}
             <div className="flex items-center justify-between">

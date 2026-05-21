@@ -53,6 +53,7 @@ from app.api import intelligence as intelligence_router
 from app.api import charts as charts_router
 from app.api import ai as ai_router
 from app.api import predictions as predictions_router
+from app.api import notification_prefs as notification_prefs_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -228,6 +229,29 @@ async def run_trade_scan():
         logger.error("[Scheduler] Trade scan failed: %s", exc)
 
 
+async def run_morning_brief():
+    """Send daily morning brief at 7:00 AM IST (01:30 UTC) on weekdays."""
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.services.notifications import NotificationService
+        from app.api.notification_prefs import _get_prefs
+        async with AsyncSessionLocal() as db:
+            prefs = _get_prefs()
+            if not prefs.enabled:
+                logger.info("[MorningBrief] Notifications disabled — skipping.")
+                return
+            svc = NotificationService()
+            result = await svc.send_morning_brief(
+                db=db,
+                override_email=prefs.email_address if prefs.email_enabled else None,
+                override_telegram_token=prefs.telegram_bot_token if prefs.telegram_enabled else None,
+                override_telegram_chat_id=prefs.telegram_chat_id if prefs.telegram_enabled else None,
+            )
+            logger.info("[MorningBrief] %s", result)
+    except Exception as exc:
+        logger.error("[MorningBrief] Failed: %s", exc)
+
+
 async def check_and_run_initial_load():
     """
     On boot: if stock_prices has fewer than 100 rows, trigger the full
@@ -371,6 +395,14 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
+    # ── Morning brief: 01:30 UTC = 7:00 AM IST every weekday ──────────────────
+    scheduler.add_job(
+        run_morning_brief,
+        CronTrigger(hour=1, minute=30, day_of_week="mon-fri"),
+        id="morning_brief",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "[Scheduler] Jobs registered:\n"
@@ -438,6 +470,7 @@ app.include_router(intelligence_router.router, prefix="/api/v1/intelligence", ta
 app.include_router(charts_router.router, prefix="/api/v1/charts", tags=["charts"])
 app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(predictions_router.router, prefix="/api/v1/predictions", tags=["predictions"])
+app.include_router(notification_prefs_router.router, prefix="/api/v1/notifications", tags=["notifications"])
 
 import os
 from fastapi.staticfiles import StaticFiles

@@ -145,4 +145,11 @@ export const chartsApi = {
         api.get(`/charts/multi/${ticker.toUpperCase()}`),
 };
 
+export const notificationsApi = {
+    getPreferences:   () => api.get('/notifications/preferences'),
+    savePreferences:  (body) => api.put('/notifications/preferences', body),
+    sendTest:         () => api.post('/notifications/test'),
+    preview:          () => api.get('/notifications/preview'),
+};
+
 export default api;

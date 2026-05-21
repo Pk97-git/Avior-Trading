@@ -6,10 +6,17 @@ NotificationService — fires when new alerts are created.
 Supports:
   • Slack webhooks  (SLACK_WEBHOOK_URL)
   • Email via SMTP  (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / ALERT_EMAIL_TO)
+  • Telegram bot    (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)
 
-Both channels are optional — if the env var is absent, that channel is skipped.
+All channels are optional — if the env var is absent, that channel is skipped.
 Errors are logged and swallowed so a notification failure never blocks the
 main analysis pipeline.
+
+Morning Brief
+-------------
+send_morning_brief(db) queries trade_opportunities, picks #1, and delivers a
+richly formatted message (HTML email + Telegram HTML parse-mode) to all
+configured channels.
 """
 from __future__ import annotations
 
@@ -41,6 +48,9 @@ class NotificationService:
         self.smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user: Optional[str] = os.getenv("SMTP_USER")
         self.smtp_pass: Optional[str] = os.getenv("SMTP_PASS")
+        # Telegram
+        self.telegram_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+        self.telegram_chat_id: Optional[str] = os.getenv("TELEGRAM_CHAT_ID")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Public entry point
@@ -334,3 +344,102 @@ class NotificationService:
 </html>"""
 
         return plain, html
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Telegram
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _send_telegram(self, html_text: str, token: Optional[str] = None,
+                              chat_id: Optional[str] = None) -> None:
+        """Send a message to a Telegram chat using the Bot API (HTML parse mode)."""
+        tok  = token   or self.telegram_token
+        cid  = chat_id or self.telegram_chat_id
+        if not tok or not cid:
+            return
+
+        import httpx
+        url = f"https://api.telegram.org/bot{tok}/sendMessage"
+        payload = {
+            "chat_id":    cid,
+            "text":       html_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+        logger.info("[Notifications] Telegram sent to chat %s", cid)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Morning brief
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def send_morning_brief(
+        self,
+        db,
+        override_email: Optional[str] = None,
+        override_telegram_token: Optional[str] = None,
+        override_telegram_chat_id: Optional[str] = None,
+    ) -> dict:
+        """
+        Compose and deliver the daily morning brief.
+
+        Picks the top trade_opportunity, formats rich Email + Telegram messages,
+        and fires both channels concurrently. Returns a status dict.
+        """
+        from app.engines.morning_brief_composer import (
+            compose_morning_brief, format_telegram, format_email_html, format_email_plain,
+        )
+
+        brief = await compose_morning_brief(db)
+        if not brief:
+            return {"status": "no_opportunity", "message": "No qualifying trade found for today."}
+
+        email_to  = override_email or self.email_to
+        tg_token  = override_telegram_token  or self.telegram_token
+        tg_chat   = override_telegram_chat_id or self.telegram_chat_id
+
+        tasks = []
+
+        if email_to and self.smtp_user and self.smtp_pass:
+            subject, html_body = format_email_html(brief)
+            plain_body = format_email_plain(brief)
+            tasks.append(self._send_morning_email(email_to, subject, plain_body, html_body))
+
+        if tg_token and tg_chat:
+            tg_text = format_telegram(brief)
+            tasks.append(self._send_telegram(tg_text, token=tg_token, chat_id=tg_chat))
+
+        if not tasks:
+            return {"status": "no_channels", "message": "No delivery channels configured.", "brief": brief}
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        errors = [str(r) for r in results if isinstance(r, Exception)]
+        if errors:
+            logger.warning("[MorningBrief] Delivery errors: %s", errors)
+
+        return {
+            "status":   "sent" if not errors else "partial",
+            "ticker":   brief["ticker"],
+            "score":    brief["score"],
+            "channels": len(tasks) - len(errors),
+            "errors":   errors,
+        }
+
+    async def _send_morning_email(self, to: str, subject: str, plain: str, html: str) -> None:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._smtp_send_to, subject, plain, html, to)
+        logger.info("[MorningBrief] Email sent to %s", to)
+
+    def _smtp_send_to(self, subject: str, plain: str, html: str, to: str) -> None:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = self.smtp_user
+        msg["To"]      = to
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html,  "html"))
+        with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(self.smtp_user, self.smtp_pass)
+            server.sendmail(self.smtp_user, to, msg.as_string())
