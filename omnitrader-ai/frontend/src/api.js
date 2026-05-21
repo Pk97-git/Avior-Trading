@@ -183,4 +183,30 @@ export const screenerApi = {
     save:         (body) => api.post('/screener/save', body),
 };
 
+export const pairsApi = {
+    getCandidates: (sector, minZscore = 1.5) =>
+        api.get('/pairs/candidates', { params: { sector, min_zscore: minZscore } }),
+    analyzePair: (a, b) => api.get(`/pairs/analyze/${a}/${b}`),
+    getSectors:  () => api.get('/pairs/sectors'),
+};
+
+export const factorApi = {
+    getPortfolio: () => api.get('/factor-exposure/portfolio'),
+    getTicker:    (ticker) => api.get(`/factor-exposure/ticker/${ticker}`),
+};
+
+export const shortCandidatesApi = {
+    get: (params = {}) => api.get('/short-candidates', { params }),
+};
+
+export const positionSizingApi = {
+    calculate: (body) => api.post('/position-size/calculate', body),
+    explain:   () => api.get('/position-size/explain'),
+};
+
+export const stressTestApi = {
+    run:       (body = {}) => api.post('/stress-test/run', body),
+    scenarios: () => api.get('/stress-test/scenarios'),
+};
+
 export default api;

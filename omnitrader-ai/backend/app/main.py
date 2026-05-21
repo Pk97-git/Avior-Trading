@@ -57,6 +57,11 @@ from app.api import notification_prefs as notification_prefs_router
 from app.api import patterns as patterns_router
 from app.api import screener as screener_router
 from app.api import broker_connect as broker_connect_router
+from app.api import pairs as pairs_router
+from app.api import position_sizing as position_sizing_router
+from app.api import stress_testing as stress_testing_router
+from app.api import factor_exposure as factor_exposure_router
+from app.api import short_candidates as short_candidates_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -477,6 +482,11 @@ app.include_router(notification_prefs_router.router, prefix="/api/v1/notificatio
 app.include_router(patterns_router.router,          prefix="/api/v1/patterns",      tags=["patterns"])
 app.include_router(screener_router.router,          prefix="/api/v1/screener",      tags=["screener"])
 app.include_router(broker_connect_router.router,   prefix="/api/v1/broker",        tags=["broker"])
+app.include_router(pairs_router.router,            prefix="/api/v1/pairs",         tags=["pairs"])
+app.include_router(position_sizing_router.router, prefix="/api/v1/position-size", tags=["position-sizing"])
+app.include_router(stress_testing_router.router,  prefix="/api/v1/stress-test",   tags=["stress-testing"])
+app.include_router(factor_exposure_router.router,  prefix="/api/v1/factor-exposure",   tags=["factors"])
+app.include_router(short_candidates_router.router, prefix="/api/v1/short-candidates",  tags=["shorts"])
 
 import os
 from fastapi.staticfiles import StaticFiles

@@ -3,7 +3,7 @@ import {
     LayoutDashboard, Database, Activity, Settings, Globe, Zap,
     Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase,
     ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper, Users,
-    Menu, X, BookOpen, Filter,
+    Menu, X, BookOpen, Filter, GitCompare, Calculator,
 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
@@ -30,6 +30,9 @@ import EconomicCalendar from './components/EconomicCalendar';
 import Charts from './components/Charts';
 import PatternScanner from './components/PatternScanner';
 import Screener from './components/Screener';
+import PairsTrading from './components/PairsTrading';
+import PositionSizerPanel from './components/PositionSizer';
+import StressTest from './components/StressTest';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -49,15 +52,18 @@ const TABS = [
     { id: 'econCalendar', label: 'Economic Calendar',   icon: Calendar },
     { id: 'sectors',      label: 'Sector Rotation',     icon: BarChart },
     // ── Risk & Analytics ──────────────────────────────────────
-    { id: 'risk',         label: 'Risk Dashboard',      icon: ShieldAlert },
-    { id: 'performance',  label: 'Signal Performance',  icon: BarChart2 },
-    { id: 'backtest',     label: 'Backtest',             icon: FlaskConical },
+    { id: 'risk',            label: 'Risk Dashboard',   icon: ShieldAlert },
+    { id: 'position-sizer',  label: 'Position Sizer',   icon: Calculator },
+    { id: 'stress-test',     label: 'Stress Test',      icon: ShieldAlert },
+    { id: 'performance',     label: 'Signal Performance', icon: BarChart2 },
+    { id: 'backtest',        label: 'Backtest',          icon: FlaskConical },
     // ── Research ──────────────────────────────────────────────
     { id: 'screener',     label: 'Screener',            icon: Filter },
     { id: 'market',       label: 'Market Analysis',     icon: Activity },
     { id: 'compounders',  label: 'Compounders',         icon: Award },
     { id: 'charts',       label: 'Charts',              icon: BarChart2 },
     { id: 'patterns',     label: 'Pattern Scanner',     icon: TrendingUp },
+    { id: 'pairs',        label: 'Pairs Trading',       icon: GitCompare },
     // ── Data ──────────────────────────────────────────────────
     { id: 'data',         label: 'Data Ingestion',      icon: Database },
     { id: 'jobs',         label: 'Active Jobs',         icon: Activity },
@@ -80,8 +86,8 @@ const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
-    { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
-    { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns'] },
+    { label: 'Risk & Analytics', ids: ['risk', 'position-sizer', 'stress-test', 'performance', 'backtest'] },
+    { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns', 'pairs'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
 
@@ -257,6 +263,7 @@ export default function App() {
                     {activeTab === 'compounders' && <Compounders />}
                     {activeTab === 'charts'      && <Charts />}
                     {activeTab === 'patterns'    && <PatternScanner onNavigate={handleNavigate} />}
+                    {activeTab === 'pairs'       && <PairsTrading />}
                     {activeTab === 'data'        && <IngestionDashboard onNavigate={handleNavigate} />}
                     {activeTab === 'jobs'        && <LiveJobsView />}
                     {activeTab === 'universe'    && <StockUniverse onNavigate={handleNavigate} />}
