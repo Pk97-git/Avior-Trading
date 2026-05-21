@@ -62,6 +62,8 @@ from app.api import position_sizing as position_sizing_router
 from app.api import stress_testing as stress_testing_router
 from app.api import factor_exposure as factor_exposure_router
 from app.api import short_candidates as short_candidates_router
+from app.api import earnings_nlp as earnings_nlp_router
+from app.api import dark_pool as dark_pool_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -487,6 +489,8 @@ app.include_router(position_sizing_router.router, prefix="/api/v1/position-size"
 app.include_router(stress_testing_router.router,  prefix="/api/v1/stress-test",   tags=["stress-testing"])
 app.include_router(factor_exposure_router.router,  prefix="/api/v1/factor-exposure",   tags=["factors"])
 app.include_router(short_candidates_router.router, prefix="/api/v1/short-candidates",  tags=["shorts"])
+app.include_router(earnings_nlp_router.router, prefix="/api/v1/earnings-nlp",  tags=["earnings-nlp"])
+app.include_router(dark_pool_router.router,    prefix="/api/v1/dark-pool",     tags=["dark-pool"])
 
 import os
 from fastapi.staticfiles import StaticFiles

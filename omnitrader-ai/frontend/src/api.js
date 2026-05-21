@@ -209,4 +209,16 @@ export const stressTestApi = {
     scenarios: () => api.get('/stress-test/scenarios'),
 };
 
+export const earningsNlpApi = {
+    getTicker: (ticker, days = 45) =>
+        api.get(`/earnings-nlp/${ticker.toUpperCase()}`, { params: { days } }),
+    getMovers:  (params = {}) => api.get('/earnings-nlp/recent/movers', { params }),
+};
+
+export const darkPoolApi = {
+    getTicker:    (ticker, period = '60d') =>
+        api.get(`/dark-pool/${ticker.toUpperCase()}`, { params: { period } }),
+    scanUniverse: (params = {}) => api.get('/dark-pool/scan/universe', { params }),
+};
+
 export default api;
