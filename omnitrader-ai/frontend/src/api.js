@@ -165,4 +165,12 @@ export const patternsApi = {
         api.get(`/patterns/${ticker.toUpperCase()}/chart-annotations`, { params }),
 };
 
+export const screenerApi = {
+    run:          (body) => api.post('/screener/run', body),
+    getFields:    () => api.get('/screener/fields'),
+    getTemplates: () => api.get('/screener/templates'),
+    getSaved:     () => api.get('/screener/saved'),
+    save:         (body) => api.post('/screener/save', body),
+};
+
 export default api;

@@ -162,13 +162,14 @@ function SwingCard({ item, onNavigate }) {
                 )}
 
                 {/* Footer */}
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 mt-auto">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-border/40 mt-auto">
                     <span className="text-[10px] text-muted-foreground/60">{fmtDate(generated_at)}</span>
                     <button
                         onClick={() => onNavigate('hub', ticker)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium
+                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium
                             bg-primary/10 text-primary border border-primary/20
-                            hover:bg-primary/20 hover:border-primary/40 transition-colors"
+                            hover:bg-primary/20 hover:border-primary/40 transition-colors
+                            w-full sm:w-auto"
                     >
                         Deep Dive
                         <ArrowUpRight size={11} />
@@ -215,13 +216,13 @@ export default function SwingSetups({ onNavigate }) {
     return (
         <div className="space-y-4">
             {/* Toolbar */}
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
                     {COUNTRY_FILTERS.map(f => (
                         <button
                             key={f.key}
                             onClick={() => setCountry(f.key)}
-                            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                            className={`shrink-0 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                                 country === f.key
                                     ? 'bg-primary text-primary-foreground'
                                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -232,9 +233,9 @@ export default function SwingSetups({ onNavigate }) {
                     ))}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                     {!loading && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground hidden sm:inline">
                             {filtered.length} setup{filtered.length !== 1 ? 's' : ''}
                         </span>
                     )}

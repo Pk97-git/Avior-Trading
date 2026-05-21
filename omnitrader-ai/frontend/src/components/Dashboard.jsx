@@ -36,35 +36,37 @@ function StatCard({ icon, label, value, sub, color }) {
 function AlertRow({ alert }) {
     const { ticker, name, country, signal, previous_signal, final_score, headline, generated_at, image_url } = alert;
     return (
-        <div className="flex items-start gap-3 py-3 border-b border-border/40 last:border-0 hover:bg-muted/10 transition-colors p-2 rounded-lg -mx-2">
+        <div className="flex items-start gap-3 py-3 border-b border-border/40 last:border-0 hover:bg-muted/10 transition-colors px-2 rounded-lg -mx-2">
             {image_url && (
-                <div className="shrink-0 w-12 h-12 bg-muted rounded overflow-hidden border border-border">
+                <div className="shrink-0 w-10 h-10 md:w-12 md:h-12 bg-muted rounded overflow-hidden border border-border">
                     <img src={image_url} alt="Chart" className="w-full h-full object-cover" loading="lazy" />
                 </div>
             )}
             <div className="min-w-0 flex-1">
+                {/* Line 1: ticker + signal + score */}
                 <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-xs">{ticker}</span>
-                    {name && <span className="text-muted-foreground text-xs truncate max-w-[120px]">{name}</span>}
                     {country && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${country === 'IN' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
                             {country}
                         </span>
                     )}
                     <SignalBadge signal={signal} size="sm" />
+                    {final_score != null && (
+                        <span className="text-xs font-bold tabular-nums text-foreground">{final_score}</span>
+                    )}
+                </div>
+                {/* Line 2: previous signal + timestamp (compact on mobile) */}
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {name && <span className="text-muted-foreground text-[11px] truncate max-w-[100px] md:max-w-[120px] hidden sm:inline">{name}</span>}
                     {previous_signal && previous_signal !== signal && (
                         <span className="text-[10px] text-muted-foreground/60">← {previous_signal}</span>
                     )}
+                    <span className="text-[10px] text-muted-foreground/50">
+                        {generated_at ? new Date(generated_at).toLocaleDateString() : ''}
+                    </span>
                 </div>
-                {headline && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{headline}</p>}
-            </div>
-            <div className="text-right shrink-0">
-                {final_score != null && (
-                    <span className="text-sm font-bold tabular-nums">{final_score}</span>
-                )}
-                <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                    {generated_at ? new Date(generated_at).toLocaleDateString() : ''}
-                </p>
+                {headline && <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1 md:line-clamp-none">{headline}</p>}
             </div>
         </div>
     );
@@ -143,16 +145,16 @@ export default function Dashboard({ onNavigate }) {
         <div className="space-y-6">
 
             {/* ── Header ── */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-xl font-bold">Executive Dashboard</h2>
-                    <p className="text-sm text-muted-foreground">Today's signal summary</p>
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <h2 className="text-lg md:text-xl font-bold">Executive Dashboard</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Today's signal summary</p>
                 </div>
                 <button
                     onClick={load}
-                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors"
+                    className="shrink-0 flex items-center gap-1.5 text-xs md:text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors"
                 >
-                    <RefreshCw className="h-4 w-4" /> Refresh
+                    <RefreshCw className="h-3.5 w-3.5 md:h-4 md:w-4" /> Refresh
                 </button>
             </div>
 
@@ -212,9 +214,9 @@ export default function Dashboard({ onNavigate }) {
             </div>
 
             {/* ── Signal distribution pills ── */}
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {SIGNAL_PILLS.map(({ key, label, cls }) => (
-                    <span key={key} className={`px-3 py-1 rounded-full text-xs font-semibold border ${cls}`}>
+                    <span key={key} className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${cls}`}>
                         {sc[key] || 0} {label}
                     </span>
                 ))}

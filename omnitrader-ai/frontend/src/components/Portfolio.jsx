@@ -423,6 +423,104 @@ function CloseDialog({ position, onClose, onCancel }) {
     );
 }
 
+// ─── Mobile Position Card ──────────────────────────────────────────────────────
+
+function MobilePositionCard({ pos, onNavigate, livePrices, onEdit, onClose }) {
+    const lp = livePrices[pos.ticker];
+    const livePrice = lp?.price ?? pos.current_price;
+    const liveUnrealizedPct = pos.entry_price && livePrice != null
+        ? ((livePrice - pos.entry_price) / pos.entry_price * 100)
+        : pos.unrealized_pnl_pct;
+    const liveUnrealizedPnl = pos.entry_price && pos.shares && livePrice != null
+        ? (livePrice - pos.entry_price) * pos.shares
+        : pos.unrealized_pnl;
+
+    const isPositive = liveUnrealizedPnl != null && liveUnrealizedPnl >= 0;
+    const isNegative = liveUnrealizedPnl != null && liveUnrealizedPnl < 0;
+
+    return (
+        <div className={`rounded-xl border p-3 ${
+            isPositive ? 'border-emerald-500/20 bg-emerald-500/5' :
+            isNegative ? 'border-red-500/20 bg-red-500/5' :
+            'border-border bg-card/50'
+        }`}>
+            {/* Row 1: Ticker + country + signal + actions */}
+            <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    <button
+                        onClick={() => onNavigate?.('hub', pos.ticker)}
+                        className="font-bold text-sm text-foreground hover:text-primary transition-colors"
+                    >
+                        {pos.ticker}
+                    </button>
+                    {pos.country && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                            pos.country === 'IN' ? 'bg-orange-500/10 text-orange-500' : 'bg-blue-500/10 text-blue-500'
+                        }`}>
+                            {pos.country}
+                        </span>
+                    )}
+                    {pos.signal && <SignalBadge signal={pos.signal} size="sm" />}
+                </div>
+                <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    <button
+                        onClick={onEdit}
+                        title="Edit stop/target"
+                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                    >
+                        <Edit2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                        onClick={onClose}
+                        title="Close position"
+                        className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                    >
+                        <X className="h-3.5 w-3.5" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Row 2: P&L + shares */}
+            <div className="flex items-baseline justify-between mb-2">
+                <div>
+                    {liveUnrealizedPnl != null ? (
+                        <span className={`text-base font-bold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {isPositive ? '+' : '-'}{fmt$(Math.abs(liveUnrealizedPnl))}
+                            <span className="text-xs ml-1 opacity-80">({isPositive ? '+' : ''}{liveUnrealizedPct?.toFixed(2)}%)</span>
+                        </span>
+                    ) : (
+                        <span className="text-muted-foreground/50 text-sm">—</span>
+                    )}
+                </div>
+                <span className="text-xs text-muted-foreground">{pos.shares} sh</span>
+            </div>
+
+            {/* Row 3: Entry → Current */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1.5">
+                <span>Entry: <strong className="text-foreground tabular-nums">{fmt$(pos.entry_price)}</strong></span>
+                <span className="text-muted-foreground/40">→</span>
+                <span>Now: <strong className="text-foreground tabular-nums">
+                    {livePrice != null ? fmt$(livePrice) : '—'}
+                    {lp?.price != null && <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 ml-1 align-middle" />}
+                </strong></span>
+            </div>
+
+            {/* Row 4: Stop + Target */}
+            <div className="flex items-center gap-3 text-xs">
+                <span className="text-muted-foreground">Stop: <strong className="text-red-400 tabular-nums">
+                    {pos.stop_loss != null ? fmt$(pos.stop_loss) : '—'}
+                </strong></span>
+                <span className="text-muted-foreground">Target: <strong className="text-emerald-400 tabular-nums">
+                    {pos.take_profit != null ? fmt$(pos.take_profit) : '—'}
+                </strong></span>
+                {pos.risk_pct != null && (
+                    <span className="text-muted-foreground ml-auto">Risk: <strong className="text-red-400">{pos.risk_pct.toFixed(1)}%</strong></span>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // ─── Open Positions Table ──────────────────────────────────────────────────────
 
 function OpenPositionsTable({ positions, onRefresh, onNavigate, livePrices = {} }) {
@@ -449,140 +547,190 @@ function OpenPositionsTable({ positions, onRefresh, onNavigate, livePrices = {} 
     }
 
     return (
-        <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-                <thead className="bg-muted/40 border-b border-border text-muted-foreground text-xs">
-                    <tr>
-                        <th className="text-left px-4 py-3 font-medium">Ticker</th>
-                        <th className="text-left px-4 py-3 font-medium">Signal</th>
-                        <th className="text-left px-4 py-3 font-medium">Entry Date</th>
-                        <th className="text-right px-4 py-3 font-medium">Entry $</th>
-                        <th className="text-right px-4 py-3 font-medium">Current $</th>
-                        <th className="text-right px-4 py-3 font-medium">Unrealized P&L</th>
-                        <th className="text-right px-4 py-3 font-medium">Stop</th>
-                        <th className="text-right px-4 py-3 font-medium">Target</th>
-                        <th className="text-left px-4 py-3 font-medium">Risk%</th>
-                        <th className="text-right px-4 py-3 font-medium">Action</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                    {positions.map(pos => (
-                        <React.Fragment key={pos.id}>
-                            <tr
-                                className="hover:bg-muted/20 transition-colors cursor-pointer"
-                                onClick={() => onNavigate?.('hub', pos.ticker)}
-                            >
-                                <td className="px-4 py-3">
-                                    <div className="font-bold text-sm">{pos.ticker}</div>
-                                    {pos.name && (
-                                        <div className="text-[11px] text-muted-foreground truncate max-w-[140px]">{pos.name}</div>
-                                    )}
-                                    {pos.country && (
-                                        <span className={`text-[9px] px-1.5 py-0.5 rounded-sm font-bold uppercase ${
-                                            pos.country === 'IN' ? 'bg-orange-500/10 text-orange-500' : 'bg-blue-500/10 text-blue-500'
-                                        }`}>
-                                            {pos.country}
-                                        </span>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3">
-                                    {pos.signal
-                                        ? <SignalBadge signal={pos.signal} size="sm" />
-                                        : <span className="text-xs text-muted-foreground/50">—</span>
-                                    }
-                                </td>
-                                <td className="px-4 py-3 text-xs text-muted-foreground">
-                                    {fmtDate(pos.entry_date)}
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
-                                    {fmt$(pos.entry_price)}
-                                    <div className="text-[11px] text-muted-foreground">{pos.shares} sh</div>
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
-                                    {(() => {
-                                        const lp = livePrices[pos.ticker];
-                                        const livePrice = lp?.price ?? pos.current_price;
-                                        if (livePrice == null) return <span className="text-muted-foreground/50">—</span>;
-                                        return (
-                                            <span className="flex items-center justify-end gap-1">
-                                                {fmt$(livePrice)}
-                                                {lp?.price != null && (
-                                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Live price" />
-                                                )}
+        <>
+            {/* Mobile card list */}
+            <div className="md:hidden space-y-3 p-3">
+                {positions.map(pos => (
+                    <React.Fragment key={pos.id}>
+                        <MobilePositionCard
+                            pos={pos}
+                            onNavigate={onNavigate}
+                            livePrices={livePrices}
+                            onEdit={() => {
+                                setClosingId(null);
+                                setEditingId(id => id === pos.id ? null : pos.id);
+                            }}
+                            onClose={() => {
+                                setEditingId(null);
+                                setClosingId(id => id === pos.id ? null : pos.id);
+                            }}
+                        />
+                        {editingId === pos.id && (
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+                                <table className="w-full">
+                                    <tbody>
+                                        <EditRow
+                                            position={pos}
+                                            onSave={handleSaved}
+                                            onCancel={() => setEditingId(null)}
+                                        />
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                        {closingId === pos.id && (
+                            <div className="rounded-xl border border-red-500/20 bg-red-500/5 overflow-hidden">
+                                <table className="w-full">
+                                    <tbody>
+                                        <CloseDialog
+                                            position={pos}
+                                            onClose={handleClosed}
+                                            onCancel={() => setClosingId(null)}
+                                        />
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="bg-muted/40 border-b border-border text-muted-foreground text-xs">
+                        <tr>
+                            <th className="text-left px-4 py-3 font-medium">Ticker</th>
+                            <th className="text-left px-4 py-3 font-medium">Signal</th>
+                            <th className="text-left px-4 py-3 font-medium">Entry Date</th>
+                            <th className="text-right px-4 py-3 font-medium">Entry $</th>
+                            <th className="text-right px-4 py-3 font-medium">Current $</th>
+                            <th className="text-right px-4 py-3 font-medium">Unrealized P&L</th>
+                            <th className="text-right px-4 py-3 font-medium">Stop</th>
+                            <th className="text-right px-4 py-3 font-medium">Target</th>
+                            <th className="text-left px-4 py-3 font-medium">Risk%</th>
+                            <th className="text-right px-4 py-3 font-medium">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                        {positions.map(pos => (
+                            <React.Fragment key={pos.id}>
+                                <tr
+                                    className="hover:bg-muted/20 transition-colors cursor-pointer"
+                                    onClick={() => onNavigate?.('hub', pos.ticker)}
+                                >
+                                    <td className="px-4 py-3">
+                                        <div className="font-bold text-sm">{pos.ticker}</div>
+                                        {pos.name && (
+                                            <div className="text-[11px] text-muted-foreground truncate max-w-[140px]">{pos.name}</div>
+                                        )}
+                                        {pos.country && (
+                                            <span className={`text-[9px] px-1.5 py-0.5 rounded-sm font-bold uppercase ${
+                                                pos.country === 'IN' ? 'bg-orange-500/10 text-orange-500' : 'bg-blue-500/10 text-blue-500'
+                                            }`}>
+                                                {pos.country}
                                             </span>
-                                        );
-                                    })()}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                    {(() => {
-                                        const lp = livePrices[pos.ticker];
-                                        const livePrice = lp?.price ?? pos.current_price;
-                                        const liveUnrealizedPct = pos.entry_price
-                                            ? ((livePrice - pos.entry_price) / pos.entry_price * 100)
-                                            : pos.unrealized_pnl_pct;
-                                        const liveUnrealizedPnl = pos.entry_price && pos.shares
-                                            ? (livePrice - pos.entry_price) * pos.shares
-                                            : pos.unrealized_pnl;
-                                        return <PnlCell pnl={liveUnrealizedPnl} pnlPct={liveUnrealizedPct} />;
-                                    })()}
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums text-xs text-red-400">
-                                    {pos.stop_loss != null ? fmt$(pos.stop_loss) : (
-                                        <span className="text-muted-foreground/50">—</span>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums text-xs text-emerald-400">
-                                    {pos.take_profit != null ? fmt$(pos.take_profit) : (
-                                        <span className="text-muted-foreground/50">—</span>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3">
-                                    <RiskBar riskPct={pos.risk_pct} />
-                                </td>
-                                <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
-                                    <div className="flex items-center gap-1 justify-end">
-                                        <button
-                                            onClick={() => {
-                                                setClosingId(null);
-                                                setEditingId(id => id === pos.id ? null : pos.id);
-                                            }}
-                                            title="Edit stop/target"
-                                            className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
-                                        >
-                                            <Edit2 className="h-3.5 w-3.5" />
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setEditingId(null);
-                                                setClosingId(id => id === pos.id ? null : pos.id);
-                                            }}
-                                            title="Close position"
-                                            className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                                        >
-                                            <X className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                            {editingId === pos.id && (
-                                <EditRow
-                                    position={pos}
-                                    onSave={handleSaved}
-                                    onCancel={() => setEditingId(null)}
-                                />
-                            )}
-                            {closingId === pos.id && (
-                                <CloseDialog
-                                    position={pos}
-                                    onClose={handleClosed}
-                                    onCancel={() => setClosingId(null)}
-                                />
-                            )}
-                        </React.Fragment>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        {pos.signal
+                                            ? <SignalBadge signal={pos.signal} size="sm" />
+                                            : <span className="text-xs text-muted-foreground/50">—</span>
+                                        }
+                                    </td>
+                                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                                        {fmtDate(pos.entry_date)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
+                                        {fmt$(pos.entry_price)}
+                                        <div className="text-[11px] text-muted-foreground">{pos.shares} sh</div>
+                                    </td>
+                                    <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold">
+                                        {(() => {
+                                            const lp = livePrices[pos.ticker];
+                                            const livePrice = lp?.price ?? pos.current_price;
+                                            if (livePrice == null) return <span className="text-muted-foreground/50">—</span>;
+                                            return (
+                                                <span className="flex items-center justify-end gap-1">
+                                                    {fmt$(livePrice)}
+                                                    {lp?.price != null && (
+                                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Live price" />
+                                                    )}
+                                                </span>
+                                            );
+                                        })()}
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                        {(() => {
+                                            const lp = livePrices[pos.ticker];
+                                            const livePrice = lp?.price ?? pos.current_price;
+                                            const liveUnrealizedPct = pos.entry_price
+                                                ? ((livePrice - pos.entry_price) / pos.entry_price * 100)
+                                                : pos.unrealized_pnl_pct;
+                                            const liveUnrealizedPnl = pos.entry_price && pos.shares
+                                                ? (livePrice - pos.entry_price) * pos.shares
+                                                : pos.unrealized_pnl;
+                                            return <PnlCell pnl={liveUnrealizedPnl} pnlPct={liveUnrealizedPct} />;
+                                        })()}
+                                    </td>
+                                    <td className="px-4 py-3 text-right tabular-nums text-xs text-red-400">
+                                        {pos.stop_loss != null ? fmt$(pos.stop_loss) : (
+                                            <span className="text-muted-foreground/50">—</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-right tabular-nums text-xs text-emerald-400">
+                                        {pos.take_profit != null ? fmt$(pos.take_profit) : (
+                                            <span className="text-muted-foreground/50">—</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <RiskBar riskPct={pos.risk_pct} />
+                                    </td>
+                                    <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                                        <div className="flex items-center gap-1 justify-end">
+                                            <button
+                                                onClick={() => {
+                                                    setClosingId(null);
+                                                    setEditingId(id => id === pos.id ? null : pos.id);
+                                                }}
+                                                title="Edit stop/target"
+                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                                            >
+                                                <Edit2 className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setEditingId(null);
+                                                    setClosingId(id => id === pos.id ? null : pos.id);
+                                                }}
+                                                title="Close position"
+                                                className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                                            >
+                                                <X className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {editingId === pos.id && (
+                                    <EditRow
+                                        position={pos}
+                                        onSave={handleSaved}
+                                        onCancel={() => setEditingId(null)}
+                                    />
+                                )}
+                                {closingId === pos.id && (
+                                    <CloseDialog
+                                        position={pos}
+                                        onClose={handleClosed}
+                                        onCancel={() => setClosingId(null)}
+                                    />
+                                )}
+                            </React.Fragment>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </>
     );
 }
 
@@ -655,73 +803,115 @@ function ClosedPositionsSection() {
                             No closed positions yet.
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-muted/40 border-b border-border text-muted-foreground text-xs">
-                                    <tr>
-                                        <th className="text-left px-4 py-3 font-medium">Ticker</th>
-                                        <th className="text-left px-4 py-3 font-medium">Signal</th>
-                                        <th className="text-left px-4 py-3 font-medium">Entry → Exit</th>
-                                        <th className="text-right px-4 py-3 font-medium">Return %</th>
-                                        <th className="text-left px-4 py-3 font-medium">Exit Reason</th>
-                                        <th className="text-right px-4 py-3 font-medium">Realized P&L</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border/40">
-                                    {items.map(pos => {
-                                        const pos_ret = pos.realized_pnl_pct;
-                                        return (
-                                            <tr key={pos.id} className="hover:bg-muted/20 transition-colors">
-                                                <td className="px-4 py-3">
-                                                    <div className="font-bold text-sm">{pos.ticker}</div>
-                                                    {pos.name && (
-                                                        <div className="text-[11px] text-muted-foreground truncate max-w-[130px]">{pos.name}</div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    {pos.signal
-                                                        ? <SignalBadge signal={pos.signal} size="sm" />
-                                                        : <span className="text-xs text-muted-foreground/50">—</span>
-                                                    }
-                                                </td>
-                                                <td className="px-4 py-3 text-xs text-muted-foreground">
-                                                    <div>{fmtDate(pos.entry_date)}</div>
-                                                    <div className="text-[11px] opacity-70">→ {fmtDate(pos.exit_date)}</div>
-                                                </td>
-                                                <td className="px-4 py-3 text-right">
-                                                    {pos_ret != null ? (
-                                                        <span className={`tabular-nums text-sm font-semibold ${pos_ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                            {fmtPct(pos_ret)}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-muted-foreground/50">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {EXIT_REASON_LABEL[pos.exit_reason] || pos.exit_reason || '—'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-right">
+                        <>
+                            {/* Mobile card list */}
+                            <div className="md:hidden divide-y divide-border/40">
+                                {items.map(pos => {
+                                    const pos_ret = pos.realized_pnl_pct;
+                                    const isPos = pos.realized_pnl != null && pos.realized_pnl >= 0;
+                                    const isNeg = pos.realized_pnl != null && pos.realized_pnl < 0;
+                                    return (
+                                        <div key={pos.id} className={`px-3 py-3 ${
+                                            isPos ? 'bg-emerald-500/5' : isNeg ? 'bg-red-500/5' : ''
+                                        }`}>
+                                            <div className="flex items-center justify-between gap-2 mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-sm">{pos.ticker}</span>
+                                                    {pos.signal && <SignalBadge signal={pos.signal} size="sm" />}
+                                                </div>
+                                                <div className="text-right">
                                                     {pos.realized_pnl != null ? (
-                                                        <span className={`tabular-nums text-sm font-semibold ${pos.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                            {pos.realized_pnl >= 0 ? '+' : '-'}{fmt$(Math.abs(pos.realized_pnl))}
+                                                        <span className={`text-sm font-bold tabular-nums ${isPos ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                            {isPos ? '+' : '-'}{fmt$(Math.abs(pos.realized_pnl))}
                                                         </span>
                                                     ) : (
                                                         <span className="text-muted-foreground/50">—</span>
                                                     )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                <span>{fmtDate(pos.entry_date)} → {fmtDate(pos.exit_date)}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`font-semibold tabular-nums ${pos_ret != null ? (pos_ret >= 0 ? 'text-emerald-400' : 'text-red-400') : ''}`}>
+                                                        {pos_ret != null ? fmtPct(pos_ret) : '—'}
+                                                    </span>
+                                                    <span className="text-muted-foreground/60">{EXIT_REASON_LABEL[pos.exit_reason] || pos.exit_reason || '—'}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Desktop table */}
+                            <div className="hidden md:block overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-muted/40 border-b border-border text-muted-foreground text-xs">
+                                        <tr>
+                                            <th className="text-left px-4 py-3 font-medium">Ticker</th>
+                                            <th className="text-left px-4 py-3 font-medium">Signal</th>
+                                            <th className="text-left px-4 py-3 font-medium">Entry → Exit</th>
+                                            <th className="text-right px-4 py-3 font-medium">Return %</th>
+                                            <th className="text-left px-4 py-3 font-medium">Exit Reason</th>
+                                            <th className="text-right px-4 py-3 font-medium">Realized P&L</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/40">
+                                        {items.map(pos => {
+                                            const pos_ret = pos.realized_pnl_pct;
+                                            return (
+                                                <tr key={pos.id} className="hover:bg-muted/20 transition-colors">
+                                                    <td className="px-4 py-3">
+                                                        <div className="font-bold text-sm">{pos.ticker}</div>
+                                                        {pos.name && (
+                                                            <div className="text-[11px] text-muted-foreground truncate max-w-[130px]">{pos.name}</div>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        {pos.signal
+                                                            ? <SignalBadge signal={pos.signal} size="sm" />
+                                                            : <span className="text-xs text-muted-foreground/50">—</span>
+                                                        }
+                                                    </td>
+                                                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                                                        <div>{fmtDate(pos.entry_date)}</div>
+                                                        <div className="text-[11px] opacity-70">→ {fmtDate(pos.exit_date)}</div>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        {pos_ret != null ? (
+                                                            <span className={`tabular-nums text-sm font-semibold ${pos_ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                                {fmtPct(pos_ret)}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground/50">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {EXIT_REASON_LABEL[pos.exit_reason] || pos.exit_reason || '—'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        {pos.realized_pnl != null ? (
+                                                            <span className={`tabular-nums text-sm font-semibold ${pos.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                                {pos.realized_pnl >= 0 ? '+' : '-'}{fmt$(Math.abs(pos.realized_pnl))}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground/50">—</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                             {total > 20 && (
                                 <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border">
                                     Showing 20 of {total} closed positions.
                                 </div>
                             )}
-                        </div>
+                        </>
                     )}
                 </div>
             )}

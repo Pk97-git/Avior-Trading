@@ -55,6 +55,8 @@ from app.api import ai as ai_router
 from app.api import predictions as predictions_router
 from app.api import notification_prefs as notification_prefs_router
 from app.api import patterns as patterns_router
+from app.api import screener as screener_router
+from app.api import broker_connect as broker_connect_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -473,6 +475,8 @@ app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(predictions_router.router, prefix="/api/v1/predictions", tags=["predictions"])
 app.include_router(notification_prefs_router.router, prefix="/api/v1/notifications", tags=["notifications"])
 app.include_router(patterns_router.router,          prefix="/api/v1/patterns",      tags=["patterns"])
+app.include_router(screener_router.router,          prefix="/api/v1/screener",      tags=["screener"])
+app.include_router(broker_connect_router.router,   prefix="/api/v1/broker",        tags=["broker"])
 
 import os
 from fastapi.staticfiles import StaticFiles

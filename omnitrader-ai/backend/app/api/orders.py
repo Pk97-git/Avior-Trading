@@ -142,6 +142,48 @@ async def place_manual_order(
     )
     if result["status"] == "rejected":
         raise HTTPException(status_code=422, detail=result["reason"])
+
+    # Attempt to route to live service-layer broker (secondary / supplementary path).
+    # The primary broker call already happened inside OrderManager.submit_manual via
+    # app.brokers.factory.  This secondary attempt uses the richer service-layer
+    # broker (app.services.broker) and updates the DB record with the returned
+    # broker_order_id when the primary broker was a PaperBroker (no real broker_order_id).
+    order_id = result.get("order_id")
+    if order_id and result.get("broker") == "PAPER":
+        try:
+            from app.services.broker.factory import get_broker as get_service_broker
+            from app.services.broker.base import OrderSide, OrderType as SvcOrderType
+            country = await _get_country_for_ticker(db, ticker)
+            svc_broker = get_service_broker(country)
+            if svc_broker:
+                b_order = await svc_broker.place_order(
+                    ticker=ticker,
+                    side=OrderSide.BUY if side.upper() == "BUY" else OrderSide.SELL,
+                    qty=qty,
+                    order_type=SvcOrderType.MARKET if order_type.upper() == "MARKET" else SvcOrderType.LIMIT,
+                    limit_price=limit_price,
+                )
+                # Persist broker_order_id and status back to the DB record
+                db_order_result = await db.execute(select(Order).where(Order.id == order_id))
+                db_order = db_order_result.scalars().first()
+                if db_order:
+                    db_order.broker_order_id = b_order.broker_order_id
+                    db_order.status          = b_order.status.value
+                    db_order.broker          = "ALPACA" if country == "US" else "ZERODHA"
+                    await db.commit()
+                    result["broker_order_id"] = b_order.broker_order_id
+                    result["broker"]          = db_order.broker
+                    result["order_status"]    = b_order.status.value
+                    logger.info(
+                        "[Orders] Service-layer broker routed: broker_order_id=%s",
+                        b_order.broker_order_id,
+                    )
+        except Exception as svc_exc:
+            logger.warning(
+                "[Orders] Service-layer broker routing failed (order saved locally): %s",
+                svc_exc,
+            )
+
     return result
 
 

@@ -52,11 +52,11 @@ function ScoreBar({ label, value, color = 'bg-primary' }) {
     const pct = Math.max(0, Math.min(100, value || 0));
     return (
         <div className="flex items-center gap-2 text-xs">
-            <span className="w-20 text-muted-foreground shrink-0">{label}</span>
-            <div className="flex-1 bg-muted rounded-full h-1.5">
+            <span className="w-16 md:w-20 text-muted-foreground shrink-0 text-[10px] md:text-xs">{label}</span>
+            <div className="flex-1 bg-muted rounded-full h-1.5 min-w-0">
                 <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${pct}%` }} />
             </div>
-            <span className="w-8 text-right font-medium">{value ?? '—'}</span>
+            <span className="w-6 md:w-8 text-right font-medium">{value ?? '—'}</span>
         </div>
     );
 }
@@ -77,17 +77,19 @@ function MacroBanner({ macro, cb }) {
     const vix     = macro?.vix;
 
     return (
-        <div className={`rounded-lg border px-4 py-3 flex flex-wrap items-center gap-4 ${cbStyle.bg} border-border`}>
-            <div className={`flex items-center gap-2 font-semibold text-sm ${cbStyle.color}`}>
-                <CbIcon size={16} />
-                {cbStyle.label}
+        <div className={`rounded-lg border px-4 py-3 ${cbStyle.bg} border-border`}>
+            <div className="flex flex-wrap items-center gap-4">
+                <div className={`flex items-center gap-2 font-semibold text-sm ${cbStyle.color}`}>
+                    <CbIcon size={16} />
+                    {cbStyle.label}
+                </div>
+                {cb?.reasons?.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                        {cb.reasons.join(' · ')}
+                    </span>
+                )}
             </div>
-            {cb?.reasons?.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                    {cb.reasons.join(' · ')}
-                </span>
-            )}
-            <div className="ml-auto flex items-center gap-5 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-3 md:gap-5 text-xs text-muted-foreground">
                 {vix != null && (
                     <span>VIX <strong className={vix > 25 ? 'text-red-400' : 'text-foreground'}>{fmt(vix)}</strong></span>
                 )}
@@ -456,28 +458,29 @@ export default function DailyBriefing({ onNavigate }) {
     const sells = data.top_sells || [];
 
     return (
-        <div className="space-y-6 max-w-screen-xl">
+        <div className="space-y-4 md:space-y-6 max-w-screen-xl">
 
             {/* ── Header ── */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                    <h2 className="text-xl font-bold flex items-center gap-2">
-                        <Newspaper size={20} className="text-primary" />
-                        Daily Intelligence Briefing
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
+                        <Newspaper size={18} className="text-primary shrink-0" />
+                        <span className="truncate">Daily Briefing</span>
                     </h2>
-                    <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-1.5">
-                        <Clock size={12} />
-                        {data.cached ? 'Cached' : 'Fresh'} · Generated {new Date(data.generated_at).toLocaleTimeString()} ·{' '}
-                        {data.total_analyzed} stocks analyzed
+                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <Clock size={11} />
+                        {data.cached ? 'Cached' : 'Fresh'} · {new Date(data.generated_at).toLocaleTimeString()} ·{' '}
+                        {data.total_analyzed} analyzed
                     </p>
                 </div>
                 <button
                     onClick={() => load(true)}
                     disabled={refreshing}
-                    className="flex items-center gap-2 bg-primary text-primary-foreground text-sm px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    className="shrink-0 flex items-center gap-1.5 bg-primary text-primary-foreground text-xs md:text-sm px-3 py-1.5 md:px-4 md:py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
                 >
-                    <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-                    {refreshing ? 'Refreshing…' : 'Refresh Report'}
+                    <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                    <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh Report'}</span>
+                    <span className="sm:hidden">{refreshing ? '…' : 'Refresh'}</span>
                 </button>
             </div>
 
@@ -504,20 +507,22 @@ export default function DailyBriefing({ onNavigate }) {
 
             {/* ── Upcoming Events Strip ── */}
             {data.upcoming_events?.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap text-xs">
-                    <span className="text-muted-foreground font-medium flex items-center gap-1">
-                        <Calendar size={12} />
-                        Events:
-                    </span>
-                    {data.upcoming_events.slice(0, 4).map((evt, i) => (
-                        <span key={i} className={`px-2 py-0.5 rounded border font-medium ${
-                            evt.days_until <= 3
-                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                                : 'bg-muted text-muted-foreground border-border'
-                        }`}>
-                            {evt.days_until === 0 ? 'Today' : evt.days_until === 1 ? 'Tomorrow' : `${evt.days_until}d`} · {evt.event}
+                <div className="text-xs">
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                        <span className="text-muted-foreground font-medium flex items-center gap-1 shrink-0">
+                            <Calendar size={12} />
+                            Events:
                         </span>
-                    ))}
+                        {data.upcoming_events.slice(0, 4).map((evt, i) => (
+                            <span key={i} className={`shrink-0 px-2 py-0.5 rounded border font-medium ${
+                                evt.days_until <= 3
+                                    ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                    : 'bg-muted text-muted-foreground border-border'
+                            }`}>
+                                {evt.days_until === 0 ? 'Today' : evt.days_until === 1 ? 'Tomorrow' : `${evt.days_until}d`} · {evt.event}
+                            </span>
+                        ))}
+                    </div>
                 </div>
             )}
 
