@@ -221,4 +221,24 @@ export const darkPoolApi = {
     scanUniverse: (params = {}) => api.get('/dark-pool/scan/universe', { params }),
 };
 
+export const quantApi = {
+    monteCarlotrade:     (body) => api.post('/quant/monte-carlo/trade', body),
+    varCvar:             (body) => api.post('/quant/var', body),
+    garch:               (ticker, period = '2y') => api.get(`/quant/garch/${ticker.toUpperCase()}`, { params: { period } }),
+    regime:              (ticker, period = '2y') => api.get(`/quant/regime/${ticker.toUpperCase()}`, { params: { period } }),
+};
+
+export const alphaApi = {
+    earningsQuality:  (ticker) => api.get(`/alpha/earnings-quality/${ticker.toUpperCase()}`),
+    momentumRankings: (params = {}) => api.get('/alpha/momentum/rankings', { params }),
+    filingTone:       (body) => api.post('/alpha/filing-tone', body),
+};
+
+export const portfolioOptimizerApi = {
+    frontier:       (body) => api.post('/portfolio-optimizer/frontier', body),
+    riskParity:     (body) => api.post('/portfolio-optimizer/risk-parity', body),
+    blackLitterman: (body) => api.post('/portfolio-optimizer/black-litterman', body),
+    current:        () => api.get('/portfolio-optimizer/current'),
+};
+
 export default api;

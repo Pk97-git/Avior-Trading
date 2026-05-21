@@ -4,7 +4,7 @@ import {
     Award, Star, BarChart2, TrendingUp, FlaskConical, Briefcase,
     ShoppingCart, Calendar, Layers, ShieldAlert, BarChart, Newspaper, Users,
     Menu, X, BookOpen, Filter, GitCompare, Calculator, TrendingDown,
-    MessageSquare, Eye,
+    MessageSquare, Eye, PieChart,
 } from 'lucide-react';
 import IngestionDashboard from './components/IngestionDashboard';
 import StockUniverse from './components/StockUniverse';
@@ -37,6 +37,9 @@ import StressTest from './components/StressTest';
 import FactorExposure from './components/FactorExposure';
 import EarningsNLP from './components/EarningsNLP';
 import DarkPool from './components/DarkPool';
+import QuantAnalysis from './components/QuantAnalysis';
+import AlphaSignals from './components/AlphaSignals';
+import PortfolioOptimizer from './components/PortfolioOptimizer';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -63,6 +66,8 @@ const TABS = [
     { id: 'stress-test',     label: 'Stress Test',      icon: ShieldAlert },
     { id: 'performance',     label: 'Signal Performance', icon: BarChart2 },
     { id: 'backtest',        label: 'Backtest',          icon: FlaskConical },
+    { id: 'quant',           label: 'Quant Analysis',    icon: FlaskConical },
+    { id: 'optimizer',       label: 'Portfolio Optimizer', icon: PieChart },
     // ── Research ──────────────────────────────────────────────
     { id: 'screener',     label: 'Screener',            icon: Filter },
     { id: 'market',       label: 'Market Analysis',     icon: Activity },
@@ -72,6 +77,7 @@ const TABS = [
     { id: 'pairs',        label: 'Pairs Trading',       icon: GitCompare },
     { id: 'earnings-nlp', label: 'Earnings Tone',       icon: MessageSquare },
     { id: 'dark-pool',    label: 'Dark Pool',           icon: Eye },
+    { id: 'alpha',        label: 'Alpha Signals',       icon: Zap },
     // ── Data ──────────────────────────────────────────────────
     { id: 'data',         label: 'Data Ingestion',      icon: Database },
     { id: 'jobs',         label: 'Active Jobs',         icon: Activity },
@@ -94,8 +100,8 @@ const NAV_GROUPS = [
     { label: 'Core',           ids: ['briefing', 'dashboard', 'hub', 'swing'] },
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
-    { label: 'Risk & Analytics', ids: ['risk', 'factors', 'shorts', 'position-sizer', 'stress-test', 'performance', 'backtest'] },
-    { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns', 'pairs', 'earnings-nlp', 'dark-pool'] },
+    { label: 'Risk & Analytics', ids: ['risk', 'factors', 'shorts', 'position-sizer', 'stress-test', 'performance', 'backtest', 'quant', 'optimizer'] },
+    { label: 'Research',       ids: ['screener', 'market', 'compounders', 'charts', 'patterns', 'pairs', 'earnings-nlp', 'dark-pool', 'alpha'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
 
@@ -270,6 +276,8 @@ export default function App() {
                     {activeTab === 'stress-test'    && <StressTest onNavigate={handleNavigate} />}
                     {activeTab === 'performance' && <SignalPerformance />}
                     {activeTab === 'backtest'    && <Backtest />}
+                    {activeTab === 'quant'       && <QuantAnalysis />}
+                    {activeTab === 'optimizer'   && <PortfolioOptimizer />}
                     {activeTab === 'screener'    && <Screener onNavigate={handleNavigate} />}
                     {activeTab === 'market'      && <MarketAnalysis />}
                     {activeTab === 'compounders' && <Compounders />}
@@ -278,6 +286,7 @@ export default function App() {
                     {activeTab === 'pairs'        && <PairsTrading />}
                     {activeTab === 'earnings-nlp' && <EarningsNLP />}
                     {activeTab === 'dark-pool'    && <DarkPool />}
+                    {activeTab === 'alpha'        && <AlphaSignals />}
                     {activeTab === 'data'        && <IngestionDashboard onNavigate={handleNavigate} />}
                     {activeTab === 'jobs'        && <LiveJobsView />}
                     {activeTab === 'universe'    && <StockUniverse onNavigate={handleNavigate} />}

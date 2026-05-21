@@ -64,6 +64,9 @@ from app.api import factor_exposure as factor_exposure_router
 from app.api import short_candidates as short_candidates_router
 from app.api import earnings_nlp as earnings_nlp_router
 from app.api import dark_pool as dark_pool_router
+from app.api import quant as quant_router
+from app.api import portfolio_optimizer as portfolio_optimizer_router
+from app.api import alpha_signals as alpha_signals_router
 
 logger = logging.getLogger("omnitrader")
 
@@ -491,6 +494,9 @@ app.include_router(factor_exposure_router.router,  prefix="/api/v1/factor-exposu
 app.include_router(short_candidates_router.router, prefix="/api/v1/short-candidates",  tags=["shorts"])
 app.include_router(earnings_nlp_router.router, prefix="/api/v1/earnings-nlp",  tags=["earnings-nlp"])
 app.include_router(dark_pool_router.router,    prefix="/api/v1/dark-pool",     tags=["dark-pool"])
+app.include_router(quant_router.router,        prefix="/api/v1/quant",          tags=["quant"])
+app.include_router(portfolio_optimizer_router.router, prefix="/api/v1/portfolio-optimizer", tags=["portfolio-optimizer"])
+app.include_router(alpha_signals_router.router, prefix="/api/v1/alpha", tags=["alpha"])
 
 import os
 from fastapi.staticfiles import StaticFiles
