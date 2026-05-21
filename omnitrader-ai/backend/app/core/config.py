@@ -12,8 +12,19 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "omnitrader_db"
     POSTGRES_PORT: str = "5432"
     
+    # Railway / Render inject DATABASE_URL — use it if present
+    DATABASE_URL: Optional[str] = None
+
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
+        if self.DATABASE_URL:
+            # Convert postgres:// → postgresql+asyncpg://
+            url = self.DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
     # Prefect
