@@ -829,3 +829,51 @@ async def get_active_jobs():
     }
 
 
+
+
+# ── GET /ingestion/freshness ──────────────────────────────────────────────────
+
+@router.get("/freshness")
+async def get_data_freshness(db: AsyncSession = Depends(get_db)):
+    """
+    Return data freshness status — how stale the price data is.
+    Used by the frontend to show a warning banner when data is old.
+    """
+    import datetime as dt
+
+    result = await db.execute(
+        text("SELECT MAX(date) as last_date, MAX(created_at) as last_ts FROM stock_prices")
+    )
+    row = result.fetchone()
+
+    last_date = row.last_date if row else None
+    last_ts   = row.last_ts   if row else None
+
+    now_utc = dt.datetime.now(dt.timezone.utc)
+
+    # Hours since last price row was written
+    if last_ts:
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=dt.timezone.utc)
+        hours_stale = round((now_utc - last_ts).total_seconds() / 3600, 1)
+    else:
+        hours_stale = None
+
+    # Data is stale if > 6 hours old on a weekday, or > 72h on weekend
+    is_weekend = now_utc.weekday() >= 5
+    stale_threshold = 72 if is_weekend else 6
+    is_stale = (hours_stale is not None and hours_stale > stale_threshold)
+
+    warning = None
+    if is_stale and hours_stale is not None:
+        h = int(hours_stale)
+        warning = f"Price data is {h}h old — refresh the ingestion pipeline to get the latest quotes."
+
+    return {
+        "last_price_date": str(last_date) if last_date else None,
+        "last_price_ts":   last_ts.isoformat() if last_ts else None,
+        "hours_stale":     hours_stale,
+        "is_stale":        is_stale,
+        "stale_threshold_h": stale_threshold,
+        "warning":         warning,
+    }

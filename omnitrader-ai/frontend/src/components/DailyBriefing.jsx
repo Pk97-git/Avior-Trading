@@ -3,9 +3,10 @@ import {
     Newspaper, RefreshCw, TrendingUp, TrendingDown, AlertTriangle,
     ShieldAlert, ChevronDown, ChevronUp, Target, StopCircle,
     DollarSign, Activity, Zap, BarChart2, Calendar, Layers, Users,
-    CheckCircle, XCircle, MinusCircle, ArrowRight, Clock,
+    CheckCircle, XCircle, MinusCircle, ArrowRight, Clock, Sparkles,
 } from 'lucide-react';
-import { briefingApi } from '../api';
+import { briefingApi, aiApi } from '../api';
+import { FreshnessBanner } from './SwingSetups';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -393,6 +394,109 @@ function SummaryRow({ summary, totalAnalyzed }) {
     );
 }
 
+// ─── Today's Verdict ─────────────────────────────────────────────────────────
+
+function TodaysVerdict({ data }) {
+    const [aiVerdict, setAiVerdict]   = useState(null);
+    const [loading, setLoading]       = useState(false);
+    const [asked, setAsked]           = useState(false);
+
+    const buys  = data?.top_buys  || [];
+    const sells = data?.top_sells || [];
+    const cb    = data?.circuit_breaker;
+    const vix   = data?.macro_context?.vix;
+    const regime = data?.summary?.regime || '';
+
+    // Compute local verdict without AI
+    const buyCount  = buys.length;
+    const topBuy    = buys[0];
+    const cbStatus  = cb?.status || 'UNKNOWN';
+
+    let confidence = 'MEDIUM';
+    let confidenceColor = 'text-amber-400';
+    let confidenceBg    = 'bg-amber-500/10 border-amber-500/30';
+
+    if (cbStatus === 'HALT') {
+        confidence = 'LOW'; confidenceColor = 'text-red-400'; confidenceBg = 'bg-red-500/10 border-red-500/30';
+    } else if (cbStatus === 'CLEAR' && buyCount >= 1 && (!vix || vix < 22)) {
+        confidence = 'HIGH'; confidenceColor = 'text-emerald-400'; confidenceBg = 'bg-emerald-500/10 border-emerald-500/30';
+    } else if (cbStatus === 'HALT' || buyCount === 0) {
+        confidence = 'LOW'; confidenceColor = 'text-red-400'; confidenceBg = 'bg-red-500/10 border-red-500/30';
+    }
+
+    let localVerdict = '';
+    if (cbStatus === 'HALT') {
+        localVerdict = 'Circuit breaker is active — avoid new positions today.';
+    } else if (buyCount === 0) {
+        localVerdict = 'No strong setups found today — hold cash and wait for clearer signals.';
+    } else if (buyCount === 1 && topBuy) {
+        localVerdict = `1 strong setup today: ${topBuy.ticker}${topBuy.name ? ` (${topBuy.name})` : ''} — score ${topBuy.final_score ?? ''}. ${regime ? `Regime: ${regime}.` : ''}`;
+    } else {
+        localVerdict = `${buyCount} buy opportunities today. Top pick: ${topBuy?.ticker ?? '—'} (score ${topBuy?.final_score ?? ''}). ${regime ? `Regime: ${regime}.` : ''}`;
+    }
+
+    async function askAI() {
+        if (asked) return;
+        setAsked(true);
+        setLoading(true);
+        try {
+            const context = {
+                buy_count: buyCount,
+                top_ticker: topBuy?.ticker,
+                top_score: topBuy?.final_score,
+                circuit_breaker: cbStatus,
+                vix,
+                regime,
+                sell_count: sells.length,
+            };
+            const res = await aiApi.explain(
+                topBuy?.ticker || 'MARKET',
+                context,
+                'Give me one sentence: what should I do today as a busy non-trader? Be direct. No fluff.',
+            );
+            setAiVerdict(res.data?.explanation || null);
+        } catch {
+            // fall back to local verdict silently
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const displayVerdict = aiVerdict || localVerdict;
+
+    return (
+        <div className={`rounded-xl border p-4 ${confidenceBg}`}>
+            <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <Sparkles size={14} className={confidenceColor} />
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Today's Verdict</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${confidenceBg} ${confidenceColor}`}>
+                            {confidence} CONFIDENCE
+                        </span>
+                    </div>
+                    <p className={`text-sm font-medium leading-snug ${confidenceColor}`}>
+                        {loading ? (
+                            <span className="flex items-center gap-1.5 text-muted-foreground">
+                                <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                                Thinking…
+                            </span>
+                        ) : displayVerdict}
+                    </p>
+                </div>
+                {!asked && topBuy && (
+                    <button
+                        onClick={askAI}
+                        className="shrink-0 text-[10px] px-2 py-1 rounded border border-current opacity-60 hover:opacity-100 transition-opacity flex items-center gap-1"
+                    >
+                        <Sparkles size={9} /> Ask AI
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DailyBriefing({ onNavigate }) {
@@ -459,6 +563,12 @@ export default function DailyBriefing({ onNavigate }) {
 
     return (
         <div className="space-y-4 md:space-y-6 max-w-screen-xl">
+
+            {/* ── Data freshness warning ── */}
+            <FreshnessBanner />
+
+            {/* ── Today's Verdict ── */}
+            <TodaysVerdict data={data} />
 
             {/* ── Header ── */}
             <div className="flex items-start justify-between gap-3">

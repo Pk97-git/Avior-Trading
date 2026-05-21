@@ -21,6 +21,7 @@ export const ingestionApi = {
     getHealth: () => api.get('/ingestion/health'),
     getDataProgress: () => api.get('/ingestion/data-progress'),
     getLiveJobs: () => api.get('/ingestion/active-jobs'),
+    getFreshness: () => api.get('/ingestion/freshness'),
 };
 
 export const agentsApi = {
@@ -163,6 +164,15 @@ export const patternsApi = {
         api.get('/patterns/list'),
     getChartAnnotations: (ticker, params = {}) =>
         api.get(`/patterns/${ticker.toUpperCase()}/chart-annotations`, { params }),
+};
+
+export const aiApi = {
+    explain:   (ticker, context = {}, question = '') =>
+        api.post('/ai/explain', { ticker, context, question }),
+    summarize: (text, style = 'paragraph', maxLength = 200, context = '') =>
+        api.post('/ai/summarize', { text, style, max_length: maxLength, context }),
+    reason:    (question, data = {}, depth = 'standard') =>
+        api.post('/ai/reason', { question, data, depth }),
 };
 
 export const screenerApi = {

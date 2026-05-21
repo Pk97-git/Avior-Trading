@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { agentsApi } from '../api';
-import { RefreshCw, Loader2, TrendingUp, Target, ShieldAlert, ArrowUpRight } from 'lucide-react';
+import { agentsApi, aiApi, ingestionApi } from '../api';
+import { RefreshCw, Loader2, TrendingUp, Target, ShieldAlert, ArrowUpRight,
+         Sparkles, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { SignalBadge } from './shared/SignalCard';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -84,6 +85,103 @@ function LevelRow({ icon: Icon, label, value, color = 'text-foreground' }) {
     );
 }
 
+// ── Data Freshness Banner ──────────────────────────────────────────────────
+
+export function FreshnessBanner() {
+    const [stale, setStale] = useState(null);
+
+    useEffect(() => {
+        ingestionApi.getFreshness()
+            .then(r => { if (r.data.is_stale) setStale(r.data); })
+            .catch(() => {});
+    }, []);
+
+    if (!stale) return null;
+
+    const h = stale.hours_stale != null ? Math.round(stale.hours_stale) : '?';
+    return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
+            <AlertTriangle size={13} className="shrink-0" />
+            <span>
+                Price data is <strong>{h}h old</strong> — quotes may be stale.
+                Go to <strong>Data Ingestion</strong> and trigger a price refresh.
+            </span>
+        </div>
+    );
+}
+
+// ── Explain Simply panel ───────────────────────────────────────────────────
+
+function ExplainPanel({ ticker, context }) {
+    const [open, setOpen]     = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [result, setResult]  = useState(null);
+    const [err, setErr]        = useState(null);
+
+    async function fetchExplanation() {
+        if (result) { setOpen(v => !v); return; }
+        setOpen(true);
+        setLoading(true);
+        setErr(null);
+        try {
+            const res = await aiApi.explain(ticker, context, 'Explain this trade setup in plain English for a non-trader. What is happening, why is this a buy, what is the risk?');
+            setResult(res.data);
+        } catch (e) {
+            setErr(e?.response?.data?.detail || 'AI explanation unavailable');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    return (
+        <div>
+            <button
+                onClick={fetchExplanation}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium
+                    text-purple-400 bg-purple-500/10 border border-purple-500/20
+                    hover:bg-purple-500/20 transition-colors"
+            >
+                <Sparkles size={11} />
+                Explain Simply
+                {result && (open ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
+            </button>
+
+            {open && (
+                <div className="mt-2 rounded-lg bg-slate-800/60 border border-slate-700/50 p-3 space-y-2.5 text-xs">
+                    {loading && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                            <Loader2 size={12} className="animate-spin" />
+                            Asking AI…
+                        </div>
+                    )}
+                    {err && <p className="text-amber-400">{err}</p>}
+                    {result && (
+                        <>
+                            <p className="text-slate-200 leading-relaxed">{result.explanation}</p>
+                            {result.key_factors?.length > 0 && (
+                                <ul className="space-y-1">
+                                    {result.key_factors.map((f, i) => (
+                                        <li key={i} className="flex gap-1.5 text-slate-400">
+                                            <span className="text-purple-400 mt-0.5">•</span>
+                                            {f}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {result.risk_note && (
+                                <div className="flex gap-1.5 text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded px-2 py-1.5">
+                                    <ShieldAlert size={11} className="shrink-0 mt-0.5" />
+                                    <span>{result.risk_note}</span>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function SwingCard({ item, onNavigate }) {
     const {
         ticker, name, country, signal, final_score,
@@ -98,6 +196,12 @@ function SwingCard({ item, onNavigate }) {
     const target = take_profit  ?? parsed.target ?? null;
 
     const top3 = (signal_thesis || []).slice(0, 3);
+
+    const explainContext = {
+        signal, ai_score: final_score,
+        entry_price: entry, stop_loss: stop, take_profit: target,
+        current_price,
+    };
 
     return (
         <div className="rounded-xl border border-purple-500/20 bg-card/50 flex flex-col overflow-hidden
@@ -161,6 +265,9 @@ function SwingCard({ item, onNavigate }) {
                     </ul>
                 )}
 
+                {/* Explain Simply */}
+                <ExplainPanel ticker={ticker} context={explainContext} />
+
                 {/* Footer */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-border/40 mt-auto">
                     <span className="text-[10px] text-muted-foreground/60">{fmtDate(generated_at)}</span>
@@ -215,6 +322,9 @@ export default function SwingSetups({ onNavigate }) {
 
     return (
         <div className="space-y-4">
+            {/* Freshness warning */}
+            <FreshnessBanner />
+
             {/* Toolbar */}
             <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
