@@ -3,7 +3,7 @@ import { Search, BarChart2, Grid3x3, Clock, Loader2, RefreshCw } from 'lucide-re
 import CandlestickPanel from './charts/CandlestickPanel';
 import HeatmapView from './charts/HeatmapView';
 import MultiTimeframeView from './charts/MultiTimeframeView';
-import { chartsApi } from '../api';
+import { chartsApi, patternsApi } from '../api';
 
 const PERIODS = ['1mo','3mo','6mo','1y','2y','5y'];
 const INTERVALS = [
@@ -29,6 +29,7 @@ export default function Charts() {
     const [chartData, setChartData] = useState(null);
     const [annotations, setAnnotations] = useState(null);
     const [multiData, setMultiData] = useState(null);
+    const [patternAnnotations, setPatternAnnotations] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
@@ -50,6 +51,16 @@ export default function Charts() {
         }
     }, []);
 
+    const loadPatterns = useCallback(async (t) => {
+        if (!t) return;
+        try {
+            const res = await patternsApi.getChartAnnotations(t);
+            setPatternAnnotations(res.data);
+        } catch {
+            setPatternAnnotations(null);
+        }
+    }, []);
+
     const loadMulti = useCallback(async (t) => {
         if (!t) return;
         try {
@@ -62,6 +73,7 @@ export default function Charts() {
 
     useEffect(() => {
         loadChart(ticker, period, interval);
+        loadPatterns(ticker);
         if (view === 'multi') loadMulti(ticker);
     }, [ticker, period, interval]);
 
@@ -164,7 +176,7 @@ export default function Charts() {
                 )}
                 {!error && view === 'chart' && chartData && (
                     <div className="h-full p-2">
-                        <CandlestickPanel ticker={ticker} data={chartData} annotations={annotations} />
+                        <CandlestickPanel ticker={ticker} data={chartData} annotations={annotations} patternAnnotations={patternAnnotations} />
                     </div>
                 )}
                 {!error && view === 'multi' && (

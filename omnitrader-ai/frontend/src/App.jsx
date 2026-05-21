@@ -27,6 +27,7 @@ import InsiderActivity from './components/InsiderActivity';
 import AnalystRatings from './components/AnalystRatings';
 import EconomicCalendar from './components/EconomicCalendar';
 import Charts from './components/Charts';
+import PatternScanner from './components/PatternScanner';
 
 const TABS = [
     // ── Core ──────────────────────────────────────────────────
@@ -53,6 +54,7 @@ const TABS = [
     { id: 'market',       label: 'Market Analysis',     icon: Activity },
     { id: 'compounders',  label: 'Compounders',         icon: Award },
     { id: 'charts',       label: 'Charts',              icon: BarChart2 },
+    { id: 'patterns',     label: 'Pattern Scanner',     icon: TrendingUp },
     // ── Data ──────────────────────────────────────────────────
     { id: 'data',         label: 'Data Ingestion',      icon: Database },
     { id: 'jobs',         label: 'Active Jobs',         icon: Activity },
@@ -67,7 +69,7 @@ const NAV_GROUPS = [
     { label: 'Positions',      ids: ['watchlist', 'portfolio', 'orders'] },
     { label: 'Alpha',          ids: ['earnings', 'options', 'insiders', 'analysts', 'econCalendar', 'sectors'] },
     { label: 'Risk & Analytics', ids: ['risk', 'performance', 'backtest'] },
-    { label: 'Research',       ids: ['market', 'compounders', 'charts'] },
+    { label: 'Research',       ids: ['market', 'compounders', 'charts', 'patterns'] },
     { label: 'Data',           ids: ['data', 'jobs', 'universe'] },
 ];
 
@@ -170,6 +172,7 @@ export default function App() {
                     {activeTab === 'market'      && <MarketAnalysis />}
                     {activeTab === 'compounders' && <Compounders />}
                     {activeTab === 'charts'      && <Charts />}
+                    {activeTab === 'patterns'    && <PatternScanner onNavigate={handleNavigate} />}
                     {activeTab === 'data'        && <IngestionDashboard onNavigate={handleNavigate} />}
                     {activeTab === 'jobs'        && <LiveJobsView />}
                     {activeTab === 'universe'    && <StockUniverse onNavigate={handleNavigate} />}

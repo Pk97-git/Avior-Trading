@@ -152,4 +152,17 @@ export const notificationsApi = {
     preview:          () => api.get('/notifications/preview'),
 };
 
+export const patternsApi = {
+    getTicker: (ticker, params = {}) =>
+        api.get(`/patterns/${ticker.toUpperCase()}`, { params }),
+    scanToday: (params = {}) =>
+        api.get('/patterns/scan/today', { params }),
+    backtest: (body) =>
+        api.post('/patterns/backtest', body),
+    listAll: () =>
+        api.get('/patterns/list'),
+    getChartAnnotations: (ticker, params = {}) =>
+        api.get(`/patterns/${ticker.toUpperCase()}/chart-annotations`, { params }),
+};
+
 export default api;

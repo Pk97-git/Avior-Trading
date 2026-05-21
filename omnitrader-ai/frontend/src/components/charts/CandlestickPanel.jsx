@@ -31,10 +31,13 @@ const OVERLAY_COLORS = {
     bb_lower: '#64748b',
 };
 
-export default function CandlestickPanel({ ticker, data, annotations }) {
+export default function CandlestickPanel({ ticker, data, annotations, patternAnnotations }) {
     // data = { ohlcv, indicators, stats }
     // annotations = { markers, current_levels }
+    // patternAnnotations = { markers: [{time, position, color, shape, text, size}, ...] }
 
+    const [showPatterns, setShowPatterns] = useState(true);
+    const [patternMarkers, setPatternMarkers] = useState([]);
     const [activeOverlays, setActiveOverlays] = useState({
         sma20: true, sma50: true, sma200: false,
         ema9: false, ema21: false,
@@ -161,9 +164,16 @@ export default function CandlestickPanel({ ticker, data, annotations }) {
             });
         }
 
-        // AI Signal markers
-        if (annotations?.markers?.length) {
-            candleSeries.setMarkers(annotations.markers);
+        // AI Signal markers + pattern markers (merged and sorted by time)
+        const aiMarkers = annotations?.markers || [];
+        const pMarkers = (showPatterns && patternAnnotations?.markers) ? patternAnnotations.markers : [];
+        const combinedMarkers = [...aiMarkers, ...pMarkers].sort((a, b) => {
+            if (a.time < b.time) return -1;
+            if (a.time > b.time) return 1;
+            return 0;
+        });
+        if (combinedMarkers.length) {
+            candleSeries.setMarkers(combinedMarkers);
         }
 
         // Price levels from latest AI signal
@@ -266,7 +276,7 @@ export default function CandlestickPanel({ ticker, data, annotations }) {
                 if (ref.current) { ref.current.remove(); ref.current = null; }
             });
         };
-    }, [data, annotations, activeOverlays, showLevels]);
+    }, [data, annotations, patternAnnotations, activeOverlays, showLevels, showPatterns]);
 
     // Drawing tools handler
     useEffect(() => {
@@ -372,6 +382,18 @@ export default function CandlestickPanel({ ticker, data, annotations }) {
                     >{label}</button>
                 ))}
 
+                {/* Pattern markers toggle */}
+                <button
+                    onClick={() => setShowPatterns(p => !p)}
+                    className={`px-2 py-0.5 rounded text-xs font-mono border transition-all ${
+                        showPatterns
+                            ? 'border-transparent text-zinc-900 font-semibold'
+                            : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'
+                    }`}
+                    style={showPatterns ? { background: '#f59e0b' } : {}}
+                    title="Toggle pattern markers"
+                >Patterns</button>
+
                 <div className="w-px h-4 bg-zinc-700 mx-1" />
 
                 {/* Drawing tools */}
@@ -407,6 +429,42 @@ export default function CandlestickPanel({ ticker, data, annotations }) {
 
             {/* Main chart */}
             <div ref={mainRef} className="flex-1 min-h-0 rounded" style={{ cursor: drawMode ? 'crosshair' : 'default' }} />
+
+            {/* Pattern legend */}
+            {showPatterns && patternAnnotations?.markers?.length > 0 && (() => {
+                const sorted = [...patternAnnotations.markers].sort((a, b) => (a.time < b.time ? 1 : -1));
+                const recent = sorted.slice(0, 3);
+                const now = Date.now();
+                const fmt = (time) => {
+                    // time can be a unix timestamp (seconds) or YYYY-MM-DD string
+                    let ms;
+                    if (typeof time === 'string') {
+                        ms = new Date(time).getTime();
+                    } else {
+                        ms = time * 1000;
+                    }
+                    const diff = Math.floor((now - ms) / 86400000);
+                    if (diff === 0) return 'Today';
+                    if (diff === 1) return 'Yesterday';
+                    if (diff < 7) return `${diff} days ago`;
+                    if (diff < 14) return '1 week ago';
+                    return `${Math.floor(diff / 7)} weeks ago`;
+                };
+                return (
+                    <div className="flex items-center gap-2 px-2 py-1 flex-wrap">
+                        <span className="text-xs text-zinc-600 shrink-0">Patterns:</span>
+                        {recent.map((m, i) => (
+                            <span key={i}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-zinc-700 bg-zinc-800/60"
+                            >
+                                <span style={{ color: m.color || '#f59e0b' }}>◈</span>
+                                <span className="text-zinc-300">{m.text || 'Pattern'}</span>
+                                <span className="text-zinc-600">({fmt(m.time)})</span>
+                            </span>
+                        ))}
+                    </div>
+                );
+            })()}
 
             {/* RSI sub-panel */}
             {activeOverlays.rsi && (
